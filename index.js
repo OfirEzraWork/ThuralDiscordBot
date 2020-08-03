@@ -56,14 +56,19 @@ client.on("message", async message => {
         if(msg.toLowerCase().startsWith("/help")){
             message.channel.send("I usually dont take commands from the likes of you but for now ill make an exception.\n"+
             "The commands are:\n"+
+            "Dice:\n"+
             "Dice Rolls - /roll [Number]d[Number]+[Number]\n"+
+            "\n"+
+            "Game Material:\n"+
             "Searching for a spell (Only SRD) - /spell [Name]\n"+
+            "\n"+
+            "Game Managing\n"+
             "Create a new game - /creategame\n"+
             "Set a game date - /setgamedate [GameNumber] [Date]\n"+
             "Set a game description - /setgamedesc [GameNumber] [Description]\n"+
             "Show active games - /showgames\n"+
-            "Sign up to a game - /signup [CharacterName] [GameNumber]\n\n"+
-
+            "Sign up to a game - /signup [CharacterName] [GameNumber]\n"+
+            "\n"+
             "Dealing with gold:\n"+
             "Register a character - /rc [CharacterName]\n"+
             "View your characters gold status - /gs\n"+
@@ -449,10 +454,7 @@ async function getSpell(str){
         let request = new XMLHttpRequest();
         request.open("GET", `http://www.dnd5eapi.co/api/spells/${str}`);
         request.onload = function() {
-            console.log("3")
             if(this.readyState === 4 && this.status === 200) {
-                console.log("4")
-                console.log(this.responseText)
                 let response = JSON.parse(this.responseText)
                 resolve(response)
             }
@@ -460,7 +462,6 @@ async function getSpell(str){
                 resolve(null)
             }
         };
-        console.log("1")
         request.send();
     })
 }
@@ -495,7 +496,7 @@ function getSpellStringBuilder(result){
         //End components
 
         //Duration
-        if(result.concentration === "true"){
+        if(result.concentration === true){
             returnMessage = returnMessage+`Duration: Concentration, ${result.duration}`
         }
         else{

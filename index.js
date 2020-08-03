@@ -22,9 +22,6 @@ const adminList = permissions['admin'];
 
 const joinServerChannel = 698859489100824576
 
-
-//check
-
 const client = new Client({
     disableEveryone: true
 });

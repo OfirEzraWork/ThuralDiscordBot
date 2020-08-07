@@ -1,0 +1,17 @@
+{
+    "2": {
+        "Creator": "Ofir",
+        "CreatorID": "213282396504719360",
+        "GameNumber": 2,
+        "Players": [
+            {
+                "Username": "Ofir",
+                "UserID": "213282396504719360",
+                "CharacterName": "Galion"
+            }
+        ],
+        "Date": "5/7 19:30",
+        "Description": "finding the evil sorcerer roee"
+    },
+    "maxPlayers": 6
+}

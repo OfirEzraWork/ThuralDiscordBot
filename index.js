@@ -6,15 +6,35 @@ const XMLHttpRequest = require("xmlhttprequest").XMLHttpRequest;
 
 const fs = require('fs')
 
-const games = JSON.parse(fs.readFileSync('Database/games.json', 'utf8'))
+const Table = function(path){
+    this.Path = path;
+    this.File = undefined;
+}
 
-const counters = JSON.parse(fs.readFileSync('Database/counters.json', 'utf8'))
+Table.prototype.ReadTable =  function() {
+    this.File = JSON.parse(fs.readFileSync(this.Path, 'utf8'));
+}
 
-const characters = JSON.parse(fs.readFileSync('Database/characters.json', 'utf8'))
+Table.prototype.UpdateTable = function() {
+    fs.writeFile(this.Path, JSON.stringify(this.File), (err) => {
+        if(err) message.channel.send("There seems to be a problem with this request")
+    })
+}
 
-const characterByID = JSON.parse(fs.readFileSync('Database/characterByID.json', 'utf8'))
+const gamesTable = new Table('Database/games.json');
+gamesTable.ReadTable();
 
-const transactions = JSON.parse(fs.readFileSync('Database/transactions.json', 'utf8'))
+const countersTable = new Table('Database/counters.json');
+countersTable.ReadTable();
+
+const charactersTable = new Table('Database/characters.json');
+charactersTable.ReadTable();
+
+const characterByIDTable = new Table('Database/characterByID.json');
+characterByIDTable.ReadTable();
+
+const transactionsTable = new Table('Database/transactions.json');
+transactionsTable.ReadTable();
 
 const permissions = JSON.parse(fs.readFileSync('Database/permissions.json', 'utf8'))
 
@@ -45,7 +65,7 @@ client.on("message", async message => {
     console.log(`${message.author.username} said: ${message.content}`)
     let prefix = '/'
     let msg = message.content
-    if(msg == "hi bot"){
+    if(msg.toLowerCase() == "hi bot" || msg.toLowerCase() == "hey bot"){
         message.channel.send("Hello to you as well Mortal!")
         return
     }
@@ -55,21 +75,21 @@ client.on("message", async message => {
     else if(message.content.startsWith(prefix)){
         if(msg.toLowerCase().startsWith("/help")){
             message.channel.send("I usually dont take commands from the likes of you but for now ill make an exception.\n"+
-            "The commands are:\n"+
+            "The commands are:\n\n"+
             "Dice:\n"+
             "Dice Rolls - /roll [Number]d[Number]+[Number]\n"+
             "\n"+
             "Game Material:\n"+
             "Searching for a spell (Only SRD) - /spell [Name]\n"+
             "\n"+
-            "Game Managing\n"+
+            "Game Managing:\n"+
             "Create a new game - /creategame\n"+
             "Set a game date - /setgamedate [GameNumber] [Date]\n"+
             "Set a game description - /setgamedesc [GameNumber] [Description]\n"+
             "Show active games - /showgames\n"+
             "Sign up to a game - /signup [CharacterName] [GameNumber]\n"+
             "\n"+
-            "Dealing with gold:\n"+
+            "Gold Trade:\n"+
             "Register a character - /rc [CharacterName]\n"+
             "View your characters gold status - /gs\n"+
             "Make a payment - /pay [YourCharacterID] [Amount]\n"+
@@ -84,32 +104,29 @@ client.on("message", async message => {
             reply.edit(getSpellStringBuilder(result))
         }
         else if(msg.toLowerCase().startsWith("/creategame")){
-            games[counters['gameCounter']] = {
+            games[countersTable.File.gameCounter] = {
                 "Creator" : message.author.username,
                 "CreatorID" : message.author.id,
-                "GameNumber" : counters['gameCounter'],
+                "GameNumber" : countersTable.File.gameCounter,
                 "Players" : [],
                 "Date" : null,
                 "Description" : ""
             }
 
-            fs.writeFile('Database/games.json', JSON.stringify(games), (err) => {
-                if(err) message.channel.send("There seems to be a problem with this request")
-            })
+            gamesTable.UpdateTable();
 
-            message.channel.send("The quest has been declared!\nNow gather worthy adventurers to aid you.\nGame number is: " + counters['gameCounter'])
+            message.channel.send("The quest has been declared!\nNow gather worthy adventurers to aid you.\nGame number is: " + countersTable.File.gameCounter);
 
-            counters['gameCounter']++
-            fs.writeFile('Database/counters.json', JSON.stringify(counters), (err) => {
-                if(err) message.channel.send("There seems to be a problem with this request")
-            })
+            countersTable.File.gameCounter++;
+            countersTable.UpdateTable();
         }
         else if(msg.toLowerCase().startsWith("/showgames")){
             let gamesString = ""
-            for(let game in games){
-                if(!isNaN(game)){
-                    gamesString += "Game Number: "+games[game].GameNumber+"\nCreator: "+games[game].Creator+"\nDate: "+games[game].Date+"\nDescription: "+games[game].Description+"\nPlayers:"
-                    games[game].Players.forEach((player) =>{
+            let games = gamesTable.File;
+            for(let index in gamesTable.File){
+                if(!isNaN(index)){
+                    gamesString += "Game Number: "+games[index].GameNumber+"\nCreator: "+games[index].Creator+"\nDate: "+games[index].Date+"\nDescription: "+games[index].Description+"\nPlayers:"
+                    games[index].Players.forEach((player) =>{
                         gamesString+="\n\t"+player.CharacterName
                     })
                     gamesString += "\n"
@@ -118,43 +135,56 @@ client.on("message", async message => {
             message.channel.send(gamesString)
         }
         else if(msg.toLowerCase().startsWith("/setgamedate")){
+
+            //get information
             let info = msg.split(' ')
-            let date = info.slice(2,info.length).join(' ')
-            if(info.length < 3 || isNaN(info[1])){
+            let gameNumber = info[1];
+            let date = info.slice(2,info.length).join(' ');
+            let playerID = message.author.id;
+
+            //check command syntax
+            if(info.length < 3 || isNaN(gameNumber)){
                 message.channel.send("Stop with this Jibber Jabber!\nYou dont make sense!\nBad Command")
             }
-            if(games[info[1]] == null){
+            //check if game exists
+            if(gamesTable.File[gameNumber] == null){
                 message.channel.send("This quest does not exist.\nDont waste my time with this annoyances!")
             }
-            else if(!playerIsGameCreator(message.author.id,(info[1]))){
+            //check if editing player is game creator
+            else if(!playerIsGameCreator(playerID,(gameNumber))){
                 message.channel.send("You are not the one in charge of this quest!")
             }
+            //everything is ok - change the date
             else{
-                games[info[1]].Date = date
-                fs.writeFile('Database/games.json', JSON.stringify(games), (err) => {
-                    if(err) message.channel.send("There seems to be a problem with this request")
-                })
-                message.channel.send("We will march forward in "+date+".\nDate update Successful.")
+                gamesTable.File[gameNumber].Date = date
+                gamesTable.UpdateTable();
+                message.channel.send("We will march forward in " + date + ".\nDate update Successful.")
             }
         }
         else if(msg.toLowerCase().startsWith("/setgamedesc")){
+
+            //get information
             let info = msg.split(' ')
+            let gameNumber = info[1];
             let desc = info.slice(2,info.length).join(' ')
-            if(info.length < 3 || isNaN(info[1])){
+            let playerID = message.author.id;
+
+            //check command syntax
+            if(info.length < 3 || isNaN(gameNumber)){
                 message.channel.send("Stop with this Jibber Jabber!\nYou dont make sense!\nBad Command")
             }
-            if(games[info[1]] == null){
+            //check if game exists
+            if(gamesTable.File[gameNumber] == null){
                 message.channel.send("This quest does not exist.\nDont waste my time with this annoyances!")
             }
-            else if(!playerIsGameCreator(message.author.id,(info[1]))){
+            //check if editing player is game creator
+            else if(!playerIsGameCreator(playerID,(gameNumber))){
                 message.channel.send("You are not the one in charge of this quest!")
             }
             else{
-                games[info[1]].Description = desc
-                fs.writeFile('Database/games.json', JSON.stringify(games), (err) => {
-                    if(err) message.channel.send("There seems to be a problem with this request")
-                })
-                message.channel.send("Now that explains that.\nDescription update Successful.")
+                gamesTable.File[gameNumber].Description = desc;
+                gamesTable.UpdateTable();
+                message.channel.send("Now that explains that.\nDescription update Successful.");
             }
         }
         else if(msg.toLowerCase().startsWith("/signup")){
@@ -184,54 +214,58 @@ client.on("message", async message => {
             }
         }
         else if(msg.toLowerCase().startsWith("/rc ")){
-            let info = msg.split(' ')
-            let characterName = info.slice(1,info.length).join(' ')
-            if(!playerCharacterListExists(message.author.id)){
-                characters[message.author.id] = {
-                    "Creator" : message.author.username,
+
+            //gather information
+            let info = msg.split(' ');
+            let characterName = info.slice(1,info.length).join(' ');
+            characterName = characterName.charAt(0).toUpperCase() + characterName.slice(1);
+            let playerID = message.author.id;
+            let playerUserName = message.author.username;
+            let newCharacterID = countersTable.File.characterCounter;
+
+            //build a new player character list
+            if(!playerCharacterListExists(playerID)){
+                charactersTable.File[playerID] = {
+                    "Creator" : playerUserName,
                     "Characters" : []
                 }
             }
 
-            characters[message.author.id].Characters.push({
-                "CharacterName" : characterName.charAt(0).toUpperCase() + characterName.slice(1),
+            //push the new character into the player characters list
+            charactersTable.File[playerID].Characters.push({
+                "CharacterName" : characterName,
                 "Gold" : 0,
-                "CharacterID" : counters['characterCounter']
+                "CharacterID" : newCharacterID
             })
 
-            characterByID[counters['characterCounter']] = {
+            //push the new character into the characterByID table
+            characterByIDTable.File[newCharacterID] = {
                 "CharacterName" : characterName,
-                "PlayerID" : message.author.id
+                "PlayerID" : playerID
             }
 
-            fs.writeFile('Database/characterByID.json', JSON.stringify(characterByID), (err) => {
-                if(err) message.channel.send("There seems to be a problem with this request")
-            })
+            //updating tables
+            countersTable.File.characterCounter++;
+            characterByIDTable.UpdateTable();
+            charactersTable.UpdateTable();
+            countersTable.UpdateTable();
 
-            fs.writeFile('Database/characters.json', JSON.stringify(characters), (err) => {
-                if(err) message.channel.send("There seems to be a problem with this request")
-            })
-
-            message.channel.send(`Its good meeting you ${characterName}! Your number is ${counters['characterCounter']}`)
-
-            counters['characterCounter']++
-            fs.writeFile('Database/counters.json', JSON.stringify(counters), (err) => {
-                if(err) message.channel.send("There seems to be a problem with this request")
-            })
+            message.channel.send(`Its good meeting you ${characterName}! Your number is ${newCharacterID}`);
         }
         else if(msg.toLowerCase().startsWith("/gg ")){
            
+            //get information
             let info = msg.split(' ');
             
             let characterGiverID = info[1];
             let playerGiverID = message.author.id;
             let characterReceiverID = info[2];
-            let playerReceiverID = characterByID[characterReceiverID].PlayerID;
+            let playerReceiverID = characterByIDTable.File[characterReceiverID].PlayerID;
             let gold = info[3]
             
             //giving gold to yourself
             if(playerGiverID === characterGiverID){
-                message.channel.send('Giving gold to yourself even though is possible is just stupid.\nTransaction Successful?');
+                message.channel.send('Giving gold to yourself even though its possible is just stupid.\nTransaction Successful?');
                 return;
             }
 
@@ -245,22 +279,28 @@ client.on("message", async message => {
             if(characterExists(characterGiverID) && characterExists(characterReceiverID) && characterBelongsToPlayer(playerGiverID, characterGiverID)){
 
                 //get the player viable gold status
+                /*
+                    what is a playerViableGoldStatus?
+                    this property holds the gold records for all of the player's characters.
+                    i later use this to see:
+                        1) does the character the player wants to give the money from has enough gold for this transaction
+                        2) if not, does any of his other characters have enough gold for this transaction
+                */
                 let playerViableGoldStatus = getPlayerViableGoldStatus(playerGiverID,characterGiverID,gold);
 
                 //check to see if the Giver character is viable for the transaction
                 if(playerViableGoldStatus['transactionPossible'] === true){
 
                     //perform the transaction
-                    goldTransaction(playerGiverID, characterGiverID, playerReceiverID, characterReceiverID, gold)
+                    goldTransaction(playerGiverID, characterGiverID, playerReceiverID, characterReceiverID, gold);
 
-                    fs.writeFile('Database/characters.json', JSON.stringify(characters), (err) => {
-                        if(err) message.channel.send("There seems to be a problem with this request")
-                    })
-                    message.channel.send('Transaction Successful!')                        
+                    charactersTable.UpdateTable();
+
+                    message.channel.send('Transaction Successful!');
                 }
 
                 //the Giver character is not viable for the transaction
-                //message the requester and inform him about other characters he has that are viable
+                //message the player and inform him about other characters he has that are viable
                 else{
 
                     //build the viable characters message string
@@ -300,22 +340,20 @@ client.on("message", async message => {
         }
         else if(msg.toLowerCase().startsWith("/agg ")){
 
+            //get information
             let info = msg.split(' ')
             let characterID = info[1]
             let gold = info[2]
+            let playerID = message.author.id;
 
             //check for admin permissions
-            if(adminList.find(element => element == message.author.id)){
+            if(adminList.find(element => element == playerID)){
 
                 //check if the receiver character exists
                 if(characterExists(characterID)){
 
                     //transfer the gold
-                    addGoldToCharacter(characterByID[characterID].PlayerID, characterID, gold);
-
-                    fs.writeFile('Database/characters.json', JSON.stringify(characters), (err) => {
-                        if(err) message.channel.send("There seems to be a problem with this request")
-                    })
+                    addGoldToCharacter(characterByIDTable.File[characterID].PlayerID, characterID, gold);
 
                     //record the transfer
                     recordTransactionDetails('Admin', characterID, gold)
@@ -323,7 +361,7 @@ client.on("message", async message => {
                     message.channel.send('The gold was delievered to the character!\n');
                 }
                 else{
-                    message.channel.send('I am sorry my lord, i could\'nt find him.\nTransfer failed.')
+                    message.channel.send('I am sorry my lord, i could\'nt find the creature.\nTransfer failed.')
                 }
             }
             else{
@@ -333,8 +371,8 @@ client.on("message", async message => {
         }
         else if(msg.toLowerCase().startsWith("/pay ")){
 
+            //get information
             let info = msg.split(' ');
-            
             let characterID = info[1];
             let playerID = message.author.id;
             let gold = info[2]
@@ -357,14 +395,11 @@ client.on("message", async message => {
                     //perform the transaction
                     addGoldToCharacter(playerID, characterID, -gold)
 
-                    fs.writeFile('Database/characters.json', JSON.stringify(characters), (err) => {
-                        if(err) message.channel.send("There seems to be a problem with this request")
-                    })
                     message.channel.send('Payment Received!')                        
                 }
 
                 //the Giver character is not viable for the transaction
-                //message the requester and inform him about other characters he has that are viable
+                //message the player and inform him about other characters he has that are viable
                 else{
 
                     //build the viable characters message string
@@ -408,7 +443,7 @@ function commandRoll(str){
         console.log("valid")
         const values = {
             rolls:[],
-            modifires:0,
+            modifiers:0,
             sum:0
         }
         let diceRollRegex = new RegExp('([0-9]+)d([0-9]+)')
@@ -421,9 +456,9 @@ function commandRoll(str){
         let modifiersRegex = new RegExp('((?<=\\+)[0-9]+)+', 'g')
         let modifiersRegexResult = str.toLowerCase().match(modifiersRegex);
         if(modifiersRegexResult!==null){
-            modifiersRegexResult.forEach(element2 => {
-                values.modifires = values.modifires + parseInt(element2)
-                values.sum = values.sum + parseInt(element2)
+            modifiersRegexResult.forEach(element => {
+                values.modifiers = values.modifiers + parseInt(element)
+                values.sum = values.sum + parseInt(element)
             });
         }
         console.log(values)
@@ -524,7 +559,7 @@ function getSpellStringBuilder(result){
 }
 function playerHasSignedUp(userID,gameNumber){
     let check = false;
-    games[gameNumber].Players.forEach((player) => {
+    gamesTable.File[gameNumber].Players.forEach((player) => {
         if(player.UserID === userID){
             check = true;
         }
@@ -532,31 +567,31 @@ function playerHasSignedUp(userID,gameNumber){
     return check;
 }
 function gameIsFullyBooked(gameNumber){
-    if(games[gameNumber].Players.length == games['maxPlayers']){
+    if(gamesTable.File[gameNumber].Players.length == games['maxPlayers']){
         return true
     }
     return false;
 }
 function playerIsGameCreator(userID ,gameNumber){
-    if(games[gameNumber].CreatorID == userID){
+    if(gamesTable.File[gameNumber].CreatorID == userID){
         return true
     }
     return false;
 }
 function playerCharacterListExists(playerID){
-    if(characters[playerID] !== undefined){
+    if(charactersTable.File[playerID] !== undefined){
         return true;
     }
     return false;
 }
 function characterBelongsToPlayer (playerGiverID, characterGiverID){
-    if(characterByID[characterGiverID].PlayerID === playerGiverID){
+    if(characterByIDTable.File[characterGiverID].PlayerID === playerGiverID){
         return true;
     }
     return false;
 }
 function characterExists(characterID){
-    if(characterByID[characterID] !== undefined){
+    if(characterByIDTable.File[characterID] !== undefined){
         return true;
     }
     return false;
@@ -564,7 +599,7 @@ function characterExists(characterID){
 function getPlayerViableGoldStatus (playerGiverID, characterGiverID, gold){
     
     //get the player list of characters
-    let givingPlayerCharacters = characters[playerGiverID].Characters;
+    let givingPlayerCharacters = charactersTable.File[playerGiverID].Characters;
 
     //start building the gold status object
     let playerViableGoldStatus = {};
@@ -607,7 +642,7 @@ function goldTransaction(playerGiverID, characterGiverID, playerReceiverID, char
 }
 function getGoldStatus(playerID){
     let status = '';
-    let playerCharacters = characters[playerID].Characters;
+    let playerCharacters = charactersTable.File[playerID].Characters;
     playerCharacters.forEach((character) => {
         status += `${character.CharacterName} (ID = ${character.CharacterID}): ${character.Gold} gp\n`;
     })
@@ -616,14 +651,15 @@ function getGoldStatus(playerID){
 function addGoldToCharacter(playerID, characterID, gold){
 
     //get the player characters
-    let playerCharacters = characters[playerID].Characters;
+    let playerCharacters = charactersTable.File[playerID].Characters;
 
     //find the character to act on
     for(let i = 0; i<playerCharacters.length;i++){
         if(playerCharacters[i].CharacterID == characterID){
 
             //add/reduce the gold on the character
-            characters[playerID].Characters[i].Gold += Number(gold);            
+            charactersTable.File[playerID].Characters[i].Gold += Number(gold);
+            charactersTable.UpdateTable();       
             return true
         }
     }
@@ -631,20 +667,16 @@ function addGoldToCharacter(playerID, characterID, gold){
 function recordTransactionDetails(characterGiverID, characterReceiverID, gold){
     
     //add transaction to the transaction json
-    transactions[counters['transactions']] = {
+    transactionsTable.File[countersTable.File.transactions] = {
         "CharacterGiverID" : characterGiverID,
         "CharacterReceiverID" : characterReceiverID,
         "Gold" : gold
     }
 
-    fs.writeFile('Database/transactions.json', JSON.stringify(transactions), (err) => {
-        if(err) message.channel.send("There seems to be a problem with this request")
-    })
+    //update transaction counter in the counters json
+    countersTable.File.transactions++;
 
-    //update counter in the counters json
-    counters['transactions']++
-
-    fs.writeFile('Database/counters.json', JSON.stringify(counters), (err) => {
-        if(err) message.channel.send("There seems to be a problem with this request")
-    })
+    //update tables
+    transactionsTable.UpdateTable();
+    countersTable.UpdateTable();
 }

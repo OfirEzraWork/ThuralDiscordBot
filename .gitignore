@@ -1,4 +1,4 @@
-.json
+*.json
 .env
 /node_modules
 /databases

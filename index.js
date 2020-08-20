@@ -69,10 +69,10 @@ client.on("message", async message => {
         message.channel.send("Hello to you as well Mortal!")
         return
     }
-    if(!message.content.startsWith(prefix)|message.author.bot){
+    if(!msg.startsWith(prefix)|message.author.bot){
         return
     }
-    else if(message.content.startsWith(prefix)){
+    else if(msg.startsWith(prefix)){
         if(msg.toLowerCase().startsWith("/help")){
             message.channel.send("I usually dont take commands from the likes of you but for now ill make an exception.\n"+
             "The commands are:\n\n"+
@@ -96,11 +96,11 @@ client.on("message", async message => {
             "Transfer gold to another character - /gg [YourCharacterID] [ReceivingCharacterID] [Amount]\n")
         }
         else if(msg.toLowerCase().startsWith("/roll")){
-            message.channel.send(commandRollStringBuilder(commandRoll(message.content.slice(6))))
+            message.channel.send(commandRollStringBuilder(commandRoll(msg.slice(6))))
         }
         else if(msg.toLowerCase().startsWith("/spell")){
             const reply = await message.channel.send("Searching the great library...")
-            let result = await getSpell(message.content.slice(7))
+            let result = await getSpell(msg.slice(7))
             reply.edit(getSpellStringBuilder(result))
         }
         else if(msg.toLowerCase().startsWith("/creategame")){

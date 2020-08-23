@@ -6,20 +6,7 @@ const XMLHttpRequest = require("xmlhttprequest").XMLHttpRequest;
 
 const fs = require('fs')
 
-const Table = function(path){
-    this.Path = path;
-    this.File = undefined;
-}
-
-Table.prototype.ReadTable =  function() {
-    this.File = JSON.parse(fs.readFileSync(this.Path, 'utf8'));
-}
-
-Table.prototype.UpdateTable = function() {
-    fs.writeFile(this.Path, JSON.stringify(this.File), (err) => {
-        if(err) message.channel.send("There seems to be a problem with this request")
-    })
-}
+const Table = require("./DAO");
 
 const gamesTable = new Table('databases/games.json');
 gamesTable.ReadTable();
@@ -36,11 +23,12 @@ characterByIDTable.ReadTable();
 const transactionsTable = new Table('databases/transactions.json');
 transactionsTable.ReadTable();
 
-const permissions = JSON.parse(fs.readFileSync('databases/permissions.json', 'utf8'))
+const permissionsTable = new Table('databases/permissions.json');
+permissionsTable.ReadTable();
+const adminList = permissionsTable.Get("admin");
 
-const adminList = permissions['admin'];
+const joinServerChannel = process.env.SERVER;
 
-const joinServerChannel = 698859489100824576
 
 const client = new Client({
     disableEveryone: true

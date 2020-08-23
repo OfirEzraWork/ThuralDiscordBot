@@ -21,22 +21,22 @@ Table.prototype.UpdateTable = function() {
     })
 }
 
-const gamesTable = new Table('Database/games.json');
+const gamesTable = new Table('databases/games.json');
 gamesTable.ReadTable();
 
-const countersTable = new Table('Database/counters.json');
+const countersTable = new Table('databases/counters.json');
 countersTable.ReadTable();
 
-const charactersTable = new Table('Database/characters.json');
+const charactersTable = new Table('databases/characters.json');
 charactersTable.ReadTable();
 
-const characterByIDTable = new Table('Database/characterByID.json');
+const characterByIDTable = new Table('databases/characterByID.json');
 characterByIDTable.ReadTable();
 
-const transactionsTable = new Table('Database/transactions.json');
+const transactionsTable = new Table('databases/transactions.json');
 transactionsTable.ReadTable();
 
-const permissions = JSON.parse(fs.readFileSync('Database/permissions.json', 'utf8'))
+const permissions = JSON.parse(fs.readFileSync('databases/permissions.json', 'utf8'))
 
 const adminList = permissions['admin'];
 

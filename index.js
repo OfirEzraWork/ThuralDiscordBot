@@ -88,8 +88,10 @@ client.on("message", async message => {
         }
         else if(msg.toLowerCase().startsWith("/spell")){
             const reply = await message.channel.send("Searching the great library...")
-            let result = await getSpell(msg.slice(7))
-            reply.edit(getSpellStringBuilder(result))
+            getSpell(msg.split(" ").slice(1).join("-"))
+            .then(result => {
+                reply.edit(getSpellStringBuilder(result))
+            }) 
         }
         else if(msg.toLowerCase().startsWith("/creategame")){
             games[countersTable.File.gameCounter] = {
@@ -470,9 +472,8 @@ function commandRollStringBuilder(result){
         return "You roll dice wrong.\nFoolish Human!"
     }
 }
-async function getSpell(str){
+function getSpell(str){
     return new Promise(function (resolve, reject){
-        str = str.split(" ").join("-")
         console.log(str)
         let request = new XMLHttpRequest();
         request.open("GET", `http://www.dnd5eapi.co/api/spells/${str}`);

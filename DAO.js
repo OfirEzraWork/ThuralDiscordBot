@@ -17,8 +17,16 @@ Table.prototype.UpdateTable = function() {
     })
 }
 
-Table.prototype.Get = function(key) {
+Table.prototype.Write = function(key, value) {
+    this.File[key] = value;
+}
+
+Table.prototype.Read = function(key) {
     return this.File[key];
+}
+
+Table.prototype.Delete = function(key) {
+    delete this.File[key];
 }
 
 module.exports = Table;

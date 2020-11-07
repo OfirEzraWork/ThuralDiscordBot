@@ -35,6 +35,11 @@ const MessageController = (function () {
         embedToBroadcast.setDescription(content);
         if (responseEmbed.thumbnail !== undefined) {
           embedToBroadcast.attachFiles([responseEmbed.thumbnail]);
+          console.log(
+            responseEmbed.thumbnail.split("/")[
+              responseEmbed.thumbnail.split("/").length - 1
+            ]
+          );
           embedToBroadcast.setThumbnail(
             `attachment://${
               responseEmbed.thumbnail.split("/")[
@@ -101,20 +106,55 @@ const gamesDAO = (function () {
   const gamesTable = new JsonTable(DBPaths.gamesTablePath);
   gamesTable.ReadTable();
   return {
-    playerIsGameCreator: function (playerID, gameNumber) {
-      if (gamesTable.Read(gameNumber).CreatorID == playerID) {
+    playerIsGameCreator: function (playerID, gameID) {
+      if (gamesTable.Read(gameID).CreatorID == playerID) {
         return true;
       }
       return false;
     },
-    gameIsFullyBooked: function (gameNumber) {
-      if (gamesTable.Read(gameNumber).Players.length == games["maxPlayers"]) {
+    gameIsFullyBooked: function (gameID) {
+      const game = gamesTable.Read(gameID);
+      if (game.Players.length == game.MaxPlayers) {
         return true;
       }
       return false;
     },
-    getAGamePlayersList: function (gameNumber) {
-      return gamesTable.Read(gameNumber).Players;
+    getAGamePlayersList: function (gameID) {
+      return gamesTable.Read(gameID).Players;
+    },
+    createAGame: function (newGameID, playerUserName, playerID) {
+      gamesTable.Write(newGameID, {
+        Creator: playerUserName,
+        CreatorID: playerID,
+        Active: true,
+        Players: [],
+        Date: null,
+        Description: "",
+      });
+      gamesTable.UpdateTable();
+    },
+    getGame: function (gameID) {
+      return gamesTable.Read(gameID);
+    },
+    setGame: function (gameID, game) {
+      gamesTable.Write(gameID, game);
+      gamesTable.UpdateTable();
+    },
+    playerHasSignedUp: function (playerID, gameID) {
+      let result = false;
+      gamesDAO.getAGamePlayersList(gameID).forEach((player) => {
+        console.log(player.PlayerID);
+        console.log(playerID);
+        console.log(player.PlayerID === playerID);
+        if (player.PlayerID === playerID) {
+          console.log("what");
+          result = true;
+        }
+      });
+      return result;
+    },
+    getActiveGames: function () {
+      return gamesTable.ReadAllWhere("Active", true);
     },
   };
 })();
@@ -150,14 +190,18 @@ const facadeController = (function () {
       "Set a game date - /setgamedate [GameNumber] [Date]\n" +
       "Set a game description - /setgamedesc [GameNumber] [Description]\n" +
       "Show active games - /showgames\n" +
-      "Sign up to a game - /signup [CharacterName] [GameNumber]\n" +
+      "Show game - /showgame [GameNumber]\n" +
+      "Sign up to a game (A) - /signup [GameNumber]\n" +
+      "Close game - /closegame [GameNumber]\n" +
       "\n" +
       "Gold Trade:\n" +
       "Register a character - /rc [CharacterName]\n" +
       "View your characters gold status - /gs\n" +
       "Change active character - /active [CharacterID]\n" +
-      "Make a payment - /pay [YourCharacterID] [Amount]\n" +
-      "Transfer gold to another character - /gg [ReceivingCharacterID] [Amount]\n"
+      "Make a payment (A) - /pay [Amount]\n" +
+      "Transfer gold to another character (A) - /gg [ReceivingCharacterID] [Amount]\n" +
+      "\n" +
+      "Commands marked with (A) uses your current active character."
     );
   };
 
@@ -515,6 +559,181 @@ const facadeController = (function () {
     return "Your coffers are not able at the current moment to afford that transaction!\nTransaction failed\n";
   };
 
+  //Game Managing Functions
+  const createANewGame = function (playerUserName, playerID) {
+    const newGameID = countersDAO.getCounter("gameCounter");
+    gamesDAO.createAGame(newGameID, playerUserName, playerID);
+    countersDAO.increaseCounter("gameCounter");
+    return `The quest has been declared!\nNow gather worthy adventurers to aid you.\nGame number is: ${newGameID}`;
+  };
+  const gameChecks = function (checksNeeded, playerID, gameID, variables) {
+    const result = {
+      checksOut: true,
+      response: null,
+      game: null,
+    };
+
+    //check for valid input string
+    if (checksNeeded.varsLengthCheck.needed) {
+      if (
+        variables.split(" ").length < checksNeeded.varsLengthCheck.length ||
+        isNaN(gameID)
+      ) {
+        result.checksOut = false;
+        result.response =
+          "Stop with this Jibber Jabber!\nYou dont make sense!\nBad Command";
+        return result;
+      }
+    }
+
+    //check if game exists
+    const game = gamesDAO.getGame(gameID);
+    if (checksNeeded.gameExistsCheck) {
+      if (game === undefined) {
+        result.checksOut = false;
+        result.response =
+          "This quest does not exist.\nDont waste my time with this annoyances!";
+        return result;
+      }
+    }
+
+    //check if editing player is game creator
+    if (checksNeeded.playerIsGameCreatorCheck) {
+      if (game.CreatorID != playerID) {
+        result.checksOut = false;
+        result.response = "You are not the one in charge of this quest!";
+        return result;
+      }
+    }
+
+    //check if the game is still active
+    if (checksNeeded.gameIsActive) {
+      if (!game.Active) {
+        result.checksOut = false;
+        result.response =
+          "That quest happend long ago.\nI think they died in that one.";
+        return result;
+      }
+    }
+
+    //check if a player has already signed to a game
+    if (checksNeeded.playerIsAlreadySignedUpCheck) {
+      if (gamesDAO.playerHasSignedUp(playerID, gameID)) {
+        result.checksOut = false;
+        result.response = "You have already enlisted to this quest!";
+        return result;
+      }
+    }
+
+    //check if a game is fully booked
+    if (checksNeeded.gameIsFullyBookedCheck) {
+      if (gamesDAO.gameIsFullyBooked(gameID)) {
+        result.checksOut = false;
+        result.response =
+          "Ugh! The road is not wide enough for all of you!\nYou'll have to sit this one out im afraid...\nGame is fully booked";
+        return result;
+      }
+    }
+
+    result.game = game;
+    return result;
+  };
+  const setGameDate = function (playerID, variables) {
+    const gameID = variables.split(" ")[0];
+    const date = variables.split(" ").slice(1).join(" ");
+    const checksNeeded = {
+      varsLengthCheck: {
+        needed: true,
+        length: 2,
+      },
+      gameExistsCheck: true,
+      playerIsGameCreatorCheck: true,
+      gameIsActive: true,
+    };
+    const result = gameChecks(checksNeeded, playerID, gameID, variables);
+
+    if (result.checksOut) {
+      result.game.Date = date;
+      gamesDAO.setGame(gameID, result.game);
+      return "We will march forward in " + date + ".\nDate update Successful.";
+    } else {
+      return result.response;
+    }
+  };
+  const setGameDesc = function (playerID, variables) {
+    const gameID = variables.split(" ")[0];
+    const desc = variables.split(" ").slice(1).join(" ");
+    const checksNeeded = {
+      varsLengthCheck: {
+        needed: true,
+        length: 2,
+      },
+      gameExistsCheck: true,
+      playerIsGameCreatorCheck: true,
+      gameIsActive: true,
+    };
+    const result = gameChecks(checksNeeded, playerID, gameID, variables);
+
+    if (result.checksOut) {
+      result.game.Description = desc;
+      gamesDAO.setGame(gameID, result.game);
+      return "Good plan!\nHope you wont burn in lava.\nDescription update Successful.";
+    } else {
+      return result.response;
+    }
+  };
+  const signUp = function (playerUserName, playerID, variables) {
+    const gameID = variables.split(" ")[0];
+    const checksNeeded = {
+      varsLengthCheck: {
+        needed: true,
+        length: 1,
+      },
+      gameExistsCheck: true,
+      gameIsActive: true,
+      playerIsAlreadySignedUpCheck: true,
+      gameIsFullyBookedCheck: true,
+    };
+    const character = charactersDAO.getActiveCharacter(playerID);
+    const result = gameChecks(checksNeeded, playerID, gameID, variables);
+
+    if (result.checksOut) {
+      result.game.Players.push({
+        PlayerUsername: playerUserName,
+        PlayerID: playerID,
+        CharacterID: character.CharacterID,
+        CharacterName: character.CharacterName,
+      });
+      gamesDAO.setGame(gameID, result.game);
+      return "Prepare your weapon and don your armor.\nThis will be a tough one.\nSignup Successful.";
+    } else {
+      return result.response;
+    }
+  };
+  const showActiveGames = function () {
+    let gamesString = "";
+    const activeGames = gamesDAO.getActiveGames();
+    for (let index in activeGames) {
+      gamesString +=
+        "Game Number: " +
+        index +
+        "\nCreator: " +
+        activeGames[index].Creator +
+        "\nDate: " +
+        activeGames[index].Date +
+        "\nDescription: " +
+        activeGames[index].Description;
+      if (activeGames[index].Players.length > 0) {
+        gamesString += "\nPlayers:";
+        activeGames[index].Players.forEach((player) => {
+          gamesString += "\n\t" + player.CharacterName;
+        });
+      }
+      gamesString += "\n\n";
+    }
+    return gamesString;
+  };
+
   return {
     DoWork: async function (processedMessage) {
       processedMessage.responseNeeded = true;
@@ -565,19 +784,33 @@ const facadeController = (function () {
           processedMessage.player.playerID,
           processedMessage.parsedMessage.variables
         );
+      } else if (processedMessage.parsedMessage.command === "creategame") {
+        processedMessage.response = createANewGame(
+          processedMessage.player.playerUserName,
+          processedMessage.player.playerID
+        );
+      } else if (processedMessage.parsedMessage.command === "setgamedate") {
+        processedMessage.response = setGameDate(
+          processedMessage.player.playerID,
+          processedMessage.parsedMessage.variables
+        );
+      } else if (processedMessage.parsedMessage.command === "setgamedesc") {
+        processedMessage.response = setGameDesc(
+          processedMessage.player.playerID,
+          processedMessage.parsedMessage.variables
+        );
+      } else if (processedMessage.parsedMessage.command === "signup") {
+        processedMessage.response = signUp(
+          processedMessage.player.playerUserName,
+          processedMessage.player.playerID,
+          processedMessage.parsedMessage.variables
+        );
+      } else if (processedMessage.parsedMessage.command === "showgames") {
+        processedMessage.response = showActiveGames();
       } else {
         processedMessage.response =
           "I cant understand what you're saying, please be more precise!\nUnrecognized Command";
       }
-    },
-
-    playerHasSignedUp: function (playerID, gameNumber) {
-      gamesDAO.getAGamePlayersList(gameNumber).forEach((player) => {
-        if (player.PlayerID === playerID) {
-          return true;
-        }
-      });
-      return false;
     },
   };
 })();
@@ -627,175 +860,168 @@ client.on("aaaaa", async (message) => {
     return;
   } else if (msg.startsWith(prefix)) {
     if (msg.toLowerCase().startsWith("/help")) {
-      message.channel.send(
-        "I usually dont take commands from the likes of you but for now ill make an exception.\n" +
-          "The commands are:\n\n" +
-          "Dice:\n" +
-          "Dice Rolls - /roll [Number]d[Number]+[Number]\n" +
-          "\n" +
-          "Game Material:\n" +
-          "Searching for a spell (Only SRD) - /spell [Name]\n" +
-          "\n" +
-          "Game Managing:\n" +
-          "Create a new game - /creategame\n" +
-          "Set a game date - /setgamedate [GameNumber] [Date]\n" +
-          "Set a game description - /setgamedesc [GameNumber] [Description]\n" +
-          "Show active games - /showgames\n" +
-          "Sign up to a game - /signup [CharacterName] [GameNumber]\n" +
-          "\n" +
-          "Gold Trade:\n" +
-          "Register a character - /rc [CharacterName]\n" +
-          "View your characters gold status - /gs\n" +
-          "Change active character - /active [CharacterID]\n" +
-          "Make a payment - /pay [YourCharacterID] [Amount]\n" +
-          "Transfer gold to another character - /gg [ReceivingCharacterID] [Amount]\n"
-      );
-    }
-    // else if(msg.toLowerCase().startsWith("/roll")){
-    //     message.channel.send(commandRollStringBuilder(commandRoll(msg.slice(6))))
-    // }
-    // else if(msg.toLowerCase().startsWith("/spell")){
-    //     const reply = await message.channel.send("Searching the great library...");
-    //     getSpell(msg.split(" ").slice(1).join("-"))
-    //     .then(result => {
-    //         reply.edit(getSpellStringBuilder(result))
-    //     });
-    // }
-    else if (msg.toLowerCase().startsWith("/creategame")) {
-      games[countersTable.File.gameCounter] = {
-        Creator: message.author.username,
-        CreatorID: message.author.id,
-        GameNumber: countersTable.File.gameCounter,
-        Players: [],
-        Date: null,
-        Description: "",
-      };
-
-      gamesTable.UpdateTable();
-
-      message.channel.send(
-        "The quest has been declared!\nNow gather worthy adventurers to aid you.\nGame number is: " +
-          countersTable.File.gameCounter
-      );
-
-      countersTable.File.gameCounter++;
-      countersTable.UpdateTable();
+      //   message.channel.send(
+      //     "I usually dont take commands from the likes of you but for now ill make an exception.\n" +
+      //       "The commands are:\n\n" +
+      //       "Dice:\n" +
+      //       "Dice Rolls - /roll [Number]d[Number]+[Number]\n" +
+      //       "\n" +
+      //       "Game Material:\n" +
+      //       "Searching for a spell (Only SRD) - /spell [Name]\n" +
+      //       "\n" +
+      //       "Game Managing:\n" +
+      //       "Create a new game - /creategame\n" +
+      //       "Set a game date - /setgamedate [GameNumber] [Date]\n" +
+      //       "Set a game description - /setgamedesc [GameNumber] [Description]\n" +
+      //       "Show active games - /showgames\n" +
+      //       "Sign up to a game - /signup [CharacterName] [GameNumber]\n" +
+      //       "\n" +
+      //       "Gold Trade:\n" +
+      //       "Register a character - /rc [CharacterName]\n" +
+      //       "View your characters gold status - /gs\n" +
+      //       "Change active character - /active [CharacterID]\n" +
+      //       "Make a payment - /pay [YourCharacterID] [Amount]\n" +
+      //       "Transfer gold to another character - /gg [ReceivingCharacterID] [Amount]\n"
+      //   );
+      // else if(msg.toLowerCase().startsWith("/roll")){
+      //     message.channel.send(commandRollStringBuilder(commandRoll(msg.slice(6))))
+      // }
+      // else if(msg.toLowerCase().startsWith("/spell")){
+      //     const reply = await message.channel.send("Searching the great library...");
+      //     getSpell(msg.split(" ").slice(1).join("-"))
+      //     .then(result => {
+      //         reply.edit(getSpellStringBuilder(result))
+      //     });
+      // }
+      // else if (msg.toLowerCase().startsWith("/creategame")) {
+      //   games[countersTable.File.gameCounter] = {
+      //     Creator: message.author.username,
+      //     CreatorID: message.author.id,
+      //     GameNumber: countersTable.File.gameCounter,
+      //     Players: [],
+      //     Date: null,
+      //     Description: "",
+      //   };
+      //   gamesTable.UpdateTable();
+      //   message.channel.send(
+      //     "The quest has been declared!\nNow gather worthy adventurers to aid you.\nGame number is: " +
+      //       countersTable.File.gameCounter
+      //   );
+      //   countersTable.File.gameCounter++;
+      //   countersTable.UpdateTable();
     } else if (msg.toLowerCase().startsWith("/showgames")) {
-      let gamesString = "";
-      let games = gamesTable.File;
-      for (let index in gamesTable.File) {
-        if (!isNaN(index)) {
-          gamesString +=
-            "Game Number: " +
-            games[index].GameNumber +
-            "\nCreator: " +
-            games[index].Creator +
-            "\nDate: " +
-            games[index].Date +
-            "\nDescription: " +
-            games[index].Description +
-            "\nPlayers:";
-          games[index].Players.forEach((player) => {
-            gamesString += "\n\t" + player.CharacterName;
-          });
-          gamesString += "\n";
-        }
-      }
-      message.channel.send(gamesString);
+      //   let gamesString = "";
+      //   let games = gamesTable.File;
+      //   for (let index in gamesTable.File) {
+      //     if (!isNaN(index)) {
+      //       gamesString +=
+      //         "Game Number: " +
+      //         games[index].GameNumber +
+      //         "\nCreator: " +
+      //         games[index].Creator +
+      //         "\nDate: " +
+      //         games[index].Date +
+      //         "\nDescription: " +
+      //         games[index].Description +
+      //         "\nPlayers:";
+      //       games[index].Players.forEach((player) => {
+      //         gamesString += "\n\t" + player.CharacterName;
+      //       });
+      //       gamesString += "\n";
+      //     }
+      //   }
+      //   message.channel.send(gamesString);
     } else if (msg.toLowerCase().startsWith("/setgamedate")) {
-      //get information
-      let info = msg.split(" ");
-      let gameNumber = info[1];
-      let date = info.slice(2, info.length).join(" ");
-      let playerID = message.author.id;
-
-      //check command syntax
-      if (info.length < 3 || isNaN(gameNumber)) {
-        message.channel.send(
-          "Stop with this Jibber Jabber!\nYou dont make sense!\nBad Command"
-        );
-      }
-      //check if game exists
-      if (gamesTable.File[gameNumber] == null) {
-        message.channel.send(
-          "This quest does not exist.\nDont waste my time with this annoyances!"
-        );
-      }
-      //check if editing player is game creator
-      else if (!playerIsGameCreator(playerID, gameNumber)) {
-        message.channel.send("You are not the one in charge of this quest!");
-      }
-      //everything is ok - change the date
-      else {
-        gamesTable.File[gameNumber].Date = date;
-        gamesTable.UpdateTable();
-        message.channel.send(
-          "We will march forward in " + date + ".\nDate update Successful."
-        );
-      }
+      //   //get information
+      //   let info = msg.split(" ");
+      //   let gameNumber = info[1];
+      //   let date = info.slice(2, info.length).join(" ");
+      //   let playerID = message.author.id;
+      //   //check command syntax
+      //   if (info.length < 3 || isNaN(gameNumber)) {
+      //     message.channel.send(
+      //       "Stop with this Jibber Jabber!\nYou dont make sense!\nBad Command"
+      //     );
+      //   }
+      //   //check if game exists
+      //   if (gamesTable.File[gameNumber] == null) {
+      //     message.channel.send(
+      //       "This quest does not exist.\nDont waste my time with this annoyances!"
+      //     );
+      //   }
+      //   //check if editing player is game creator
+      //   else if (!playerIsGameCreator(playerID, gameNumber)) {
+      //     message.channel.send("You are not the one in charge of this quest!");
+      //   }
+      //   //everything is ok - change the date
+      //   else {
+      //     gamesTable.File[gameNumber].Date = date;
+      //     gamesTable.UpdateTable();
+      //     message.channel.send(
+      //       "We will march forward in " + date + ".\nDate update Successful."
+      //     );
     } else if (msg.toLowerCase().startsWith("/setgamedesc")) {
-      //get information
-      let info = msg.split(" ");
-      let gameNumber = info[1];
-      let desc = info.slice(2, info.length).join(" ");
-      let playerID = message.author.id;
-
-      //check command syntax
-      if (info.length < 3 || isNaN(gameNumber)) {
-        message.channel.send(
-          "Stop with this Jibber Jabber!\nYou dont make sense!\nBad Command"
-        );
-      }
-      //check if game exists
-      if (gamesTable.File[gameNumber] == null) {
-        message.channel.send(
-          "This quest does not exist.\nDont waste my time with this annoyances!"
-        );
-      }
-      //check if editing player is game creator
-      else if (!playerIsGameCreator(playerID, gameNumber)) {
-        message.channel.send("You are not the one in charge of this quest!");
-      } else {
-        gamesTable.File[gameNumber].Description = desc;
-        gamesTable.UpdateTable();
-        message.channel.send(
-          "Now that explains that.\nDescription update Successful."
-        );
-      }
+      //   //get information
+      //   let info = msg.split(" ");
+      //   let gameNumber = info[1];
+      //   let desc = info.slice(2, info.length).join(" ");
+      //   let playerID = message.author.id;
+      //   //check command syntax
+      //   if (info.length < 3 || isNaN(gameNumber)) {
+      //     message.channel.send(
+      //       "Stop with this Jibber Jabber!\nYou dont make sense!\nBad Command"
+      //     );
+      //   }
+      //   //check if game exists
+      //   if (gamesTable.File[gameNumber] == null) {
+      //     message.channel.send(
+      //       "This quest does not exist.\nDont waste my time with this annoyances!"
+      //     );
+      //   }
+      //   //check if editing player is game creator
+      //   else if (!playerIsGameCreator(playerID, gameNumber)) {
+      //     message.channel.send("You are not the one in charge of this quest!");
+      //   } else {
+      //     gamesTable.File[gameNumber].Description = desc;
+      //     gamesTable.UpdateTable();
+      //     message.channel.send(
+      //       "Now that explains that.\nDescription update Successful."
+      //     );
+      //   }
     } else if (msg.toLowerCase().startsWith("/signup")) {
-      let info = msg.split(" ");
-      if (info.length != 3 || isNaN(info[2])) {
-        message.channel.send(
-          "Stop with this Jibber Jabber!\nYou dont make sense!\nBad Command"
-        );
-      }
-      if (games[info[2]] == null) {
-        message.channel.send(
-          "This quest does not exist.\nDont waste my time with this annoyances!"
-        );
-      } else if (playerHasSignedUp(message.author.id, info[2])) {
-        message.channel.send("You have already enlisted to this quest!");
-      } else if (gameIsFullyBooked(info[2])) {
-        message.channel.send(
-          "Ugh! Too many people!\nYou'll have to sit this one out im afraid...\nGame is fully booked"
-        );
-      } else {
-        games[info[2]].Players.push({
-          Username: message.author.username,
-          UserID: message.author.id,
-          CharacterName: info[1].charAt(0).toUpperCase() + info[1].slice(1),
-        });
-        fs.writeFile("Database/games.json", JSON.stringify(games), (err) => {
-          if (err)
-            message.channel.send(
-              "There seems to be a problem with this request"
-            );
-        });
-        message.channel.send(
-          games[info[2]].Creator +
-            " thanks you for your willingness to help in this upcoming adventure.\nMay lady luck shine upon you.\nSignup Successful."
-        );
-      }
+      //   let info = msg.split(" ");
+      //   if (info.length != 3 || isNaN(info[2])) {
+      //     message.channel.send(
+      //       "Stop with this Jibber Jabber!\nYou dont make sense!\nBad Command"
+      //     );
+      //   }
+      //   if (games[info[2]] == null) {
+      //     message.channel.send(
+      //       "This quest does not exist.\nDont waste my time with this annoyances!"
+      //     );
+      //   } else if (playerHasSignedUp(message.author.id, info[2])) {
+      //     message.channel.send("You have already enlisted to this quest!");
+      //   } else if (gameIsFullyBooked(info[2])) {
+      //     message.channel.send(
+      //       "Ugh! Too many people!\nYou'll have to sit this one out im afraid...\nGame is fully booked"
+      //     );
+      //   } else {
+      //     games[info[2]].Players.push({
+      //       Username: message.author.username,
+      //       UserID: message.author.id,
+      //       CharacterName: info[1].charAt(0).toUpperCase() + info[1].slice(1),
+      //     });
+      //     fs.writeFile("Database/games.json", JSON.stringify(games), (err) => {
+      //       if (err)
+      //         message.channel.send(
+      //           "There seems to be a problem with this request"
+      //         );
+      //     });
+      //     message.channel.send(
+      //       games[info[2]].Creator +
+      //         " thanks you for your willingness to help in this upcoming adventure.\nMay lady luck shine upon you.\nSignup Successful."
+      //     );
+      //   }
     }
   }
 });

@@ -7,8 +7,6 @@ dotenv.config({ path: "./config.env" });
 
 const XMLHttpRequest = require("xmlhttprequest").XMLHttpRequest;
 
-const fs = require("fs");
-
 const JsonTable = require("./jsonTable");
 
 const DBPaths = {

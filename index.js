@@ -5,6 +5,13 @@ const discord = require("discord.js");
 const dotenv = require("dotenv");
 dotenv.config({ path: "./config.env" });
 
+const { MongoClient } = require("mongodb");
+const uri = process.env.MONGODB_CONNECTION_STRING;
+const mongoClient = new MongoClient(uri, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+});
+
 const XMLHttpRequest = require("xmlhttprequest").XMLHttpRequest;
 
 const JsonTable = require("./jsonTable");
@@ -157,15 +164,15 @@ const gamesDAO = (function () {
   };
 })();
 
-const countersDAO = require("./daos/countersDAO.js");
+const countersDAO = require("./json_daos/countersDAO.js");
 
-const charactersDAO = require("./daos/charactersDAO.js");
+const charactersDAO = require("./json_daos/charactersDAO.js");
 
-const characterByIDDAO = require("./daos/characterByIDDAO.js");
+const characterByIDDAO = require("./json_daos/characterByIDDAO.js");
 
-const transactionsDAO = require("./daos/transactionDAO");
+const transactionsDAO = require("./json_daos/transactionDAO");
 
-const permissionsDAO = require("./daos/permissionsDAO.js");
+const permissionsDAO = require("./json_daos/permissionsDAO.js");
 
 const facadeController = (function () {
   //Help
@@ -342,7 +349,7 @@ const facadeController = (function () {
     let firstCharacter = false;
 
     //build a new player character list
-    if (!charactersDAO.playerCharacterListExists(playerID)) {
+    if (!charactersDAO.getPlayerCharacterList(playerID)) {
       charactersDAO.createCharacterList(playerID, playerUserName);
       firstCharacter = true;
     }
@@ -732,10 +739,15 @@ const facadeController = (function () {
     return gamesString;
   };
 
+  //Test Functions
+
   return {
     DoWork: async function (processedMessage) {
       processedMessage.responseNeeded = true;
-      if (processedMessage.parsedMessage.command === "help") {
+      if (processedMessage.parsedMessage.command === "test") {
+        processedMessage.response = await testFunction1();
+        processedMessage.responseNeeded = false;
+      } else if (processedMessage.parsedMessage.command === "help") {
         processedMessage.response = help(processedMessage.embed);
       } else if (processedMessage.parsedMessage.command === "roll") {
         processedMessage.response = roll(

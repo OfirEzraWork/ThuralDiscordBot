@@ -234,54 +234,80 @@ const getSpell = async function (variables) {
     const result = await getSpellHttpRequest(variables.replace(" ", "-"));
     return getSpellStringBuilder(result);
 };
-
-//Equipment
-const getAllRelevantEquipmentHttpRequest = function (str) {
-    return new Promise(function (resolve, reject) {
-    let request = new XMLHttpRequest();
-    request.open("GET", str);
-    request.onload = function () {
-        if (this.readyState === 4 && this.status === 200) {
-            let response = JSON.parse(this.responseText);
-            resolve(response);
-        } else {
-            resolve(null);
-        }
-    };
-    request.send();
-    });
-};
+/**********************************************************************************************/
+//
+//
+//                                   Equipment Functions              
+//
+//
+/**********************************************************************************************/
 
 const getAllRelevantEquipmentStringBuilder = function (result, requestData) {
     const response = [];
     let data = requestData.equipmentTitle;
-    result.equipment.forEach((equipment) => {
-    let nextData = "";
-    if((!requestData.magicItem && equipment.url.startsWith("/api/equipment")) || requestData.magicItem){
-        nextData = equipment.name+" ("+equipment.index+")\n\n";
-        if(nextData.length > 1990){
-            return "ERROR! Body exceeds possible message length";
-        } else if(data.length + nextData.length >= 1990){
-            response.push(data);
-            data = nextData;
-        } else {
-            data += nextData;
-        }
+    if(requestData.magicItem){
+        result.results.forEach((equipment) => {
+            let nextData = equipment.name+" ("+equipment.index+")\n\n";
+            if(nextData.length > 1980){
+                return "ERROR! Body exceeds possible message length";
+            } else if(data.length + nextData.length >= 1980){
+                response.push(data);
+                data = nextData;
+            } else {
+                data += nextData;
+            }
+        });
+    } else {
+        result.equipment.forEach((equipment) => {
+            let nextData = "";
+            if((equipment.url.startsWith("/api/equipment"))){
+                nextData = equipment.name+" ("+equipment.index+")\n\n";
+                if(nextData.length > 1980){
+                    return "ERROR! Body exceeds possible message length";
+                } else if(data.length + nextData.length >= 1980){
+                    response.push(data);
+                    data = nextData;
+                } else {
+                    data += nextData;
+                }
+            }
+        });
     }
 
-    });
-    if(data.length > 0){
-        response.push(data);
+    response.push(data);
+
+    if(response.length == 1) {
+        return response[0]
+    } else {
+        for (let i = 0; i < response.length; i++) {
+            response[i] += "Message "+(i+1)+"/"+response.length;
+        }
     }
     return response;
+};
+
+const getAllRelevantEquipmentHttpRequest = function (str) {
+    return new Promise(function (resolve, reject) {
+        let request = new XMLHttpRequest();
+        request.open("GET", str);
+        request.onload = function () {
+            if (this.readyState === 4 && this.status === 200) {
+                let response = JSON.parse(this.responseText);
+                resolve(response);
+            } else {
+                resolve(null);
+            }
+        };
+        request.send();
+    });
 };
 
 const getAllRelevantEquipment = async function (equipmentType) {
     const requestData = {
         equipmentUrl: "http://www.dnd5eapi.co/api/equipment-categories/",
-        magicItemUrl: "http://www.dnd5eapi.co/api/magic-items/"
+        magicItemUrl: "http://www.dnd5eapi.co/api/magic-items/",
+        magicItem: false
     }
-    let magicItem = false;
     if(equipmentType == "armors") {
         requestData.equipmentUrl = requestData.equipmentUrl+"armor";
         requestData.equipmentTitle = "Types of armor: \n";
@@ -296,7 +322,7 @@ const getAllRelevantEquipment = async function (equipmentType) {
         requestData.magicItem = true;
         requestData.equipmentTitle = "Magical Items: \n";
     }
-    if(magicItem){
+    if(requestData.magicItem){
         return getAllRelevantEquipmentStringBuilder(await getAllRelevantEquipmentHttpRequest(requestData.magicItemUrl), requestData);
     }
     else{
@@ -830,7 +856,7 @@ const DoWork = async function (processedMessage) {
         processedMessage.response = await getAllRelevantEquipment(
             processedMessage.parsedMessage.command
         );
-        processedMessage.responseNeeded = false;
+        processedMessage.responseNeeded = true;
         processedMessage.editedResponseNeeded = true;
     } else if (processedMessage.parsedMessage.command === "rc") {
         processedMessage.response = registerCharacter(

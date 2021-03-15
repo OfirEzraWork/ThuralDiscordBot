@@ -31,13 +31,10 @@ exports.SendMessage = async function (channel, content, responseEmbed) {
 
     if(Array.isArray(content)){
         content.forEach(async (msg) => {
-            console.log("im here")
             await channel.send(msg);
         });
-        console.log("im there")
         return;
     }
-    console.log("im over here")
     return await channel.send(content);
 },
 

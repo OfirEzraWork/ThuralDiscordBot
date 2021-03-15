@@ -1,0 +1,893 @@
+
+const { XMLHttpRequest } = require("xmlhttprequest");
+
+const messageController = require("./messageController.js");
+
+//JsonTable and DBPaths are required for the gamesDAO. Remove when moving gamesDAO to a different file.
+const DBPaths = {
+    gamesTablePath: "databases/games.json",
+    countersTablePath: "databases/counters.json",
+    charactersTablePath: "databases/characters.json",
+    characterByIDTablePath: "databases/characterByID.json",
+    transactionsTablePath: "databases/transactions.json",
+    permissionsTablePath: "databases/permissions.json",
+  };
+const JsonTable = require("../jsonTable");
+const gamesDAO = (function () {
+    const gamesTable = new JsonTable(DBPaths.gamesTablePath);
+    gamesTable.ReadTable();
+    return {
+      playerIsGameCreator: function (playerID, gameID) {
+        if (gamesTable.Read(gameID).CreatorID == playerID) {
+          return true;
+        }
+        return false;
+      },
+      gameIsFullyBooked: function (gameID) {
+        const game = gamesTable.Read(gameID);
+        if (game.Players.length == game.MaxPlayers) {
+          return true;
+        }
+        return false;
+      },
+      getAGamePlayersList: function (gameID) {
+        return gamesTable.Read(gameID).Players;
+      },
+      createAGame: function (newGameID, playerUserName, playerID) {
+        gamesTable.Write(newGameID, {
+          Creator: playerUserName,
+          CreatorID: playerID,
+          Active: true,
+          Players: [],
+          Date: null,
+          Description: "",
+        });
+        gamesTable.UpdateTable();
+      },
+      getGame: function (gameID) {
+        return gamesTable.Read(gameID);
+      },
+      setGame: function (gameID, game) {
+        gamesTable.Write(gameID, game);
+        gamesTable.UpdateTable();
+      },
+      playerHasSignedUp: function (playerID, gameID) {
+        let result = false;
+        gamesDAO.getAGamePlayersList(gameID).forEach((player) => {
+          if (player.PlayerID === playerID) {
+            result = true;
+          }
+        });
+        return result;
+      },
+      getActiveGames: function () {
+        return gamesTable.ReadAllWhere("Active", true);
+      },
+    };
+  })();
+const countersDAO = require("../json_daos/countersDAO.js");
+const charactersDAO = require("../json_daos/charactersDAO.js");
+const characterByIDDAO = require("../json_daos/characterByIDDAO.js");
+const transactionsDAO = require("../json_daos/transactionDAO");
+const permissionsDAO = require("../json_daos/permissionsDAO.js");
+
+//Help
+const help = function (embed) {
+    embed["embedNeeded"] = true;
+    embed["color"] = 7419530;
+    embed["title"] = "Help";
+    embed["thumbnail"] = "assets/Thural.jpg";
+    return (
+    "I usually dont take commands from the likes of you but for now ill make an exception.\n" +
+    "The commands are:\n\n" +
+    "Dice:\n" +
+    "Dice Rolls - /roll [Number]d[Number]+[Number]\n" +
+    "\n" +
+    "Game Material:\n" +
+    "Searching for a spell (Only SRD) - /spell [Name]\n" +
+    "\n" +
+    "Game Managing:\n" +
+    "Create a new game - /creategame\n" +
+    "Set a game date - /setgamedate [GameNumber] [Date]\n" +
+    "Set a game description - /setgamedesc [GameNumber] [Description]\n" +
+    "Show active games - /showgames\n" +
+    "Show game - /showgame [GameNumber]\n" +
+    "Sign up to a game (A) - /signup [GameNumber]\n" +
+    "Close game - /closegame [GameNumber]\n" +
+    "\n" +
+    "Gold Trade:\n" +
+    "Register a character - /rc [CharacterName]\n" +
+    "View your characters gold status - /gs\n" +
+    "Change active character - /active [CharacterID]\n" +
+    "Make a payment (A) - /pay [Amount]\n" +
+    "Transfer gold to another character (A) - /gg [ReceivingCharacterID] [Amount]\n" +
+    "\n" +
+    "Commands marked with (A) uses your current active character."
+    );
+};
+
+//Rolls
+const commandRoll = function (str) {
+    let messageRegex = new RegExp("([0-9]+)d([0-9]+)(\\+([0-9]+))*", "g");
+    let messageRegexResult = str.toLowerCase().match(messageRegex);
+    if (
+        messageRegexResult != null &&
+        messageRegexResult[0] === str.toLowerCase()
+    ) {
+        const values = {
+            rolls: [],
+            modifiers: 0,
+            sum: 0,
+        };
+        let diceRollRegex = new RegExp("([0-9]+)d([0-9]+)");
+        let diceRollRegexResult = str.toLowerCase().match(diceRollRegex);
+        for (let i = 0; i < parseInt(diceRollRegexResult[1]); i++) {
+            let roll =
+            Math.floor(Math.random() * parseInt(diceRollRegexResult[2])) + 1;
+            values.sum = values.sum + roll;
+            values.rolls.push(roll);
+        }
+        let modifiersRegex = new RegExp("((?<=\\+)[0-9]+)+", "g");
+        let modifiersRegexResult = str.toLowerCase().match(modifiersRegex);
+        if (modifiersRegexResult !== null) {
+            modifiersRegexResult.forEach((element) => {
+            values.modifiers = values.modifiers + parseInt(element);
+            values.sum = values.sum + parseInt(element);
+            });
+        }
+        return values;
+    } else {
+        return null;
+    }
+};
+
+const commandRollStringBuilder = function (result) {
+    if (result !== null) {
+        let returnMessage = `Total: ${result.sum}\n`;
+        result.rolls.forEach((element) => {
+            returnMessage = returnMessage + `${element}, `;
+        });
+        returnMessage = returnMessage.substring(0, returnMessage.length - 2);
+        returnMessage = returnMessage + `\nWith a +${result.modifiers} modifier`;
+        return returnMessage;
+    } else {
+        return "You roll dice wrong.\nFoolish Human!";
+    }
+};
+const roll = function (variables) {
+    return commandRollStringBuilder(commandRoll(variables));
+};
+
+//Spells
+const getSpellHttpRequest = function (str) {
+    return new Promise(function (resolve, reject) {
+    let request = new XMLHttpRequest();
+    request.open("GET", `http://www.dnd5eapi.co/api/spells/${str}`);
+    request.onload = function () {
+        if (this.readyState === 4 && this.status === 200) {
+            let response = JSON.parse(this.responseText);
+            resolve(response);
+        } else {
+            resolve(null); 
+        }
+    };
+    request.send();
+    });
+};
+
+const getSpellStringBuilder = async function (result) {
+    if (result !== null) {
+        let returnMessage = `${result.name}\n`;
+
+        //Level, School, Ritual
+        returnMessage =
+            returnMessage + `Level ${result.level} ${result.school.name}`;
+        if (result.ritual) {
+            returnMessage = returnMessage.concat(` (ritual)`);
+        }
+        returnMessage = returnMessage.concat(`\n`);
+
+        returnMessage = returnMessage + `Casting Time: ${result.casting_time}\n`;
+        returnMessage = returnMessage + `Range: ${result.range}\n`;
+        //End Level, School, Ritual
+
+        //Components
+        returnMessage = returnMessage + `Components: `;
+        result.components.forEach((element) => {
+            returnMessage = returnMessage + `${element},`;
+        });
+        returnMessage = returnMessage.slice(0, returnMessage.length - 1);
+        if ((result.material !== "") & (result.material !== undefined)) {
+            returnMessage = returnMessage + ` (${result.material})`;
+        }
+        returnMessage = returnMessage.concat(`\n`);
+
+        //End components
+
+        //Duration
+        if (result.concentration === true) {
+            returnMessage =
+            returnMessage + `Duration: Concentration, ${result.duration}`;
+        } else {
+            returnMessage = returnMessage + `Duration: ${result.duration}`;
+        }
+        returnMessage = returnMessage + `\n`;
+        //End duration
+
+        //Description
+        result.desc.forEach((element) => {
+            returnMessage = returnMessage + `${element}\n`;
+        });
+        if (result.higher_level !== undefined) {
+            result.higher_level.forEach((element) => {
+                returnMessage = returnMessage + `${element}\n`;
+            });
+        }
+        //End description
+
+        return returnMessage;
+    } else {
+        return "Spell wasn't found";
+    }
+};
+const getSpell = async function (variables) {
+    const result = await getSpellHttpRequest(variables.replace(" ", "-"));
+    return getSpellStringBuilder(result);
+};
+
+//Equipment
+const getAllRelevantEquipmentHttpRequest = function (str) {
+    return new Promise(function (resolve, reject) {
+    let request = new XMLHttpRequest();
+    request.open("GET", str);
+    request.onload = function () {
+        if (this.readyState === 4 && this.status === 200) {
+            let response = JSON.parse(this.responseText);
+            resolve(response);
+        } else {
+            resolve(null);
+        }
+    };
+    request.send();
+    });
+};
+
+const getAllRelevantEquipmentStringBuilder = function (result, requestData) {
+    const response = [];
+    let data = requestData.equipmentTitle;
+    result.equipment.forEach((equipment) => {
+    let nextData = "";
+    if((!requestData.magicItem && equipment.url.startsWith("/api/equipment")) || requestData.magicItem){
+        nextData = equipment.name+" ("+equipment.index+")\n\n";
+        if(nextData.length > 1990){
+            return "ERROR! Body exceeds possible message length";
+        } else if(data.length + nextData.length >= 1990){
+            response.push(data);
+            data = nextData;
+        } else {
+            data += nextData;
+        }
+    }
+
+    });
+    if(data.length > 0){
+        response.push(data);
+    }
+    return response;
+};
+
+const getAllRelevantEquipment = async function (equipmentType) {
+    const requestData = {
+        equipmentUrl: "http://www.dnd5eapi.co/api/equipment-categories/",
+        magicItemUrl: "http://www.dnd5eapi.co/api/magic-items/"
+    }
+    let magicItem = false;
+    if(equipmentType == "armors") {
+        requestData.equipmentUrl = requestData.equipmentUrl+"armor";
+        requestData.equipmentTitle = "Types of armor: \n";
+    } else if(equipmentType == "weapons") {
+        requestData.equipmentUrl = requestData.equipmentUrl+"weapon";
+        requestData.equipmentTitle = "Types of weapons: \n";
+    } else if(equipmentType == "ag") {
+        requestData.equipmentUrl = requestData.equipmentUrl+"adventuring-gear";
+        requestData.equipmentTitle = "Adventuring Gear: \n";
+    } else if(equipmentType == "mi") {
+        // equipmentType == "weapon";
+        requestData.magicItem = true;
+        requestData.equipmentTitle = "Magical Items: \n";
+    }
+    if(magicItem){
+        return getAllRelevantEquipmentStringBuilder(await getAllRelevantEquipmentHttpRequest(requestData.magicItemUrl), requestData);
+    }
+    else{
+        return getAllRelevantEquipmentStringBuilder(await getAllRelevantEquipmentHttpRequest(requestData.equipmentUrl), requestData);
+    }
+};
+
+//Register Character
+const registerCharacter = function (playerID, playerUserName, variables) {
+    const characterCounterString = "characterCounter";
+
+    //gather information
+    const characterName =
+    variables.charAt(0).toUpperCase() + variables.slice(1);
+    const newCharacterID = countersDAO.getCounter(characterCounterString);
+
+    let firstCharacter = false;
+
+    //build a new player character list
+    if (!charactersDAO.getPlayerCharacterList(playerID)) {
+        charactersDAO.createCharacterList(playerID, playerUserName);
+        firstCharacter = true;
+    }
+
+    //push the new character into the player characters list
+    charactersDAO.writeNewCharacter(
+        playerID,
+        characterName,
+        newCharacterID,
+        firstCharacter
+    );
+
+    //push the new character into the characterByID table
+    characterByIDDAO.addCharacterByID(newCharacterID, characterName, playerID);
+
+    //updating tables
+    countersDAO.increaseCounter(characterCounterString);
+
+    return `Its good meeting you ${characterName}! Your number is ${newCharacterID}`;
+};
+
+//Active Character
+const setActiveCharacter = function (playerID, variables) {
+    const newCharacterID = variables.split(" ")[0];
+    if (
+        characterByIDDAO.characterExists(newCharacterID) &&
+        characterByIDDAO.characterBelongsToPlayer(playerID, newCharacterID)
+    ) {
+        const activeCharacterID = charactersDAO.getActiveCharacter(playerID)
+            .CharacterID;
+        if (activeCharacterID === Number(newCharacterID)) {
+            return "This character is already your active character.";
+        } else {
+            charactersDAO.changeActiveCharacter(
+            playerID,
+            activeCharacterID,
+            newCharacterID
+            );
+            return `Success! new character ID is: ${newCharacterID}`;
+        }
+    }
+    return `Character not found or it doesn't belong to you`;
+};
+
+/**********************************************************************************************/
+//
+//
+//                                     Gold Functions              
+//
+//
+/**********************************************************************************************/
+
+//Gold Status
+const getGoldStatusStringBuilder = function (playerID) {
+    let status = "";
+    const playerCharacters = charactersDAO.getPlayerCharacterList(playerID);
+    playerCharacters.forEach((character) => {
+        status += `${character.CharacterName} (`;
+        if (character.ActiveCharacter === true) {
+            status += `Active, `;
+        }
+        status += `ID = ${character.CharacterID}): ${character.Gold} gp\n`;
+    });
+    return status;
+};
+
+const goldStatus = function (playerID, embed) {
+    const goldStatus = getGoldStatusStringBuilder(playerID);
+    if (goldStatus === "") {
+        embed["embedNeeded"] = false;
+        return "It seems that you dont have any characters.\nA shame really, guess ill have to find treasure elsewhere.\n* Flies away *\nNo characters associated to this user.";
+    }
+    embed["embedNeeded"] = true;
+    embed["color"] = 2123412;
+    embed["title"] = "Gold Status";
+    embed["thumbnail"] = "assets/dm.jpg";
+
+    return goldStatus;
+};
+
+//Give Gold Functions
+const goldTransaction = function (
+    playerGiverID,
+    characterGiverID,
+    playerReceiverID,
+    characterReceiverID,
+    gold
+) {
+    //reduce from giver
+    charactersDAO.addGoldToCharacter(playerGiverID, characterGiverID, -gold);
+
+    //increase receiver
+    charactersDAO.addGoldToCharacter(
+        playerReceiverID,
+        characterReceiverID,
+        gold
+    );
+
+    //record the transaction in the transactions json
+    transactionsDAO.recordTransactionDetails(
+        characterGiverID,
+        characterReceiverID,
+        gold,
+        countersDAO.getCounter("transactions")
+    );
+
+    countersDAO.increaseCounter("transactions");
+};
+
+const giveGold = function (playerGiverID, variables) {
+    //get information
+    if (variables.split(" ").length < 2) {
+        return "Invalid input";
+    }
+
+    const characterGiverID = charactersDAO.getActiveCharacter(playerGiverID).CharacterID;
+    const characterReceiverID = variables.split(" ")[0];
+    const playerReceiverID = characterByIDDAO.getACharacterPlayer(characterReceiverID);
+    const gold = variables.split(" ")[1];
+
+    //player doesn't have any characters
+    if (characterGiverID === undefined) {
+        return "You don't seem to represent any known individual!\nNo active character found";
+    }
+    //giving gold to yourself
+    if (characterGiverID == characterReceiverID) {
+        return "Giving gold to yourself even though its possible is just stupid.\nTransaction Successful?";
+    }
+
+    //giving negative gold
+    if (Number(gold) < 0) {
+        return "You think you can outwit me fool?\nNice try...";
+    }
+
+    //check if character exists
+    if (characterByIDDAO.characterExists(characterReceiverID)) {
+        //Enough gold to give
+        if (
+            charactersDAO.getCharacterGold(playerGiverID, characterGiverID) >= gold
+        ) {
+            //perform the transaction
+            goldTransaction(
+            playerGiverID,
+            characterGiverID,
+            playerReceiverID,
+            characterReceiverID,
+            gold
+            );
+
+            return "Transaction Successful!";
+        }
+
+        //the Giver character is not viable for the transaction
+        return "Your coffers are not able at the current moment to afford that transaction!\nTransaction failed\n";
+    } else {
+        return "I was'nt able to find that PersonBeastOoze entity!\nCharacter not found";
+    }
+};
+
+const adminGiveGold = function (playerGiverID, variables) {
+    //get information
+    const characterID = variables.split(" ")[0];
+    const gold = variables.split(" ")[1];
+
+    //check for admin permissions
+    if (permissionsDAO.userHasAdminRights(playerGiverID)) {
+        //check if the receiver character exists
+        if (characterByIDDAO.characterExists(characterID)) {
+            //transfer the gold
+            charactersDAO.addGoldToCharacter(
+                characterByIDDAO.getACharacterPlayer(characterID),
+                characterID,
+                gold
+            );
+
+            //record the transfer
+            transactionsDAO.recordTransactionDetails(
+                "Admin",
+                characterID,
+                gold,
+                countersDAO.getCounter("transactions")
+            );
+
+            //update transaction counter in the counters json
+            countersDAO.increaseCounter("transactions");
+
+            return "The gold was delievered to the character!\n";
+        } else {
+            return "I am sorry my lord, i could'nt find the creature.\nTransfer failed.";
+        }
+    } else {
+        return "You are not powerful enough to use this command!\n";
+    }
+};
+
+const pay = function (playerID, variables) {
+    //get information
+    const gold = variables.split(" ")[0];
+    const characterPayerID = charactersDAO.getActiveCharacter(playerID).CharacterID;
+
+    //player doesn't have any characters
+    if (characterPayerID === undefined) {
+        return "You don't seem to represent any known individual!\nNo active character found";
+    }
+
+    //paying negative gold
+    if (gold < 0) {
+        return "Not gonna work...";
+    }
+
+    //Enough gold to make payment
+    if (charactersDAO.getCharacterGold(playerID, characterPayerID) >= gold) {
+        //perform the transaction
+        charactersDAO.addGoldToCharacter(playerID, characterPayerID, -gold);
+
+        return "Transaction Successful!";
+    }
+
+    //the Giver character is not viable for the transaction
+    return "Your coffers are not able at the current moment to afford that transaction!\nTransaction failed\n";
+};
+
+/**********************************************************************************************/
+//
+//
+//                                  Game Managing Functions             
+//
+//
+/**********************************************************************************************/
+
+const createANewGame = function (playerUserName, playerID) {
+    const newGameID = countersDAO.getCounter("gameCounter");
+    gamesDAO.createAGame(newGameID, playerUserName, playerID);
+    countersDAO.increaseCounter("gameCounter");
+    return `The quest has been declared!\nNow gather worthy adventurers to aid you.\nGame number is: ${newGameID}`;
+};
+
+const gameChecks = function (checksNeeded, playerID, gameID, variables) {
+    const result = {
+        checksOut: true,
+        response: null,
+        game: null,
+    };
+
+    //check for valid input string
+    if (checksNeeded.varsLengthCheck.needed) {
+        if (
+            variables.split(" ").length < checksNeeded.varsLengthCheck.length ||
+            isNaN(gameID)
+        ) {
+            result.checksOut = false;
+            result.response =
+            "Stop with this Jibber Jabber!\nYou dont make sense!\nBad Command";
+            return result;
+        }
+    }
+
+    //check if game exists
+    const game = gamesDAO.getGame(gameID);
+    if (checksNeeded.gameExistsCheck) {
+        if (game === undefined) {
+            result.checksOut = false;
+            result.response =
+            "This quest does not exist.\nDont waste my time with this annoyances!";
+            return result;
+        }
+    }
+
+    //check if editing player is game creator
+    if (checksNeeded.playerIsGameCreatorCheck) {
+        if (game.CreatorID != playerID) {
+            result.checksOut = false;
+            result.response = "You are not the one in charge of this quest!";
+            return result;
+        }
+    }
+
+    //check if the game is still active
+    if (checksNeeded.gameIsActive) {
+        if (!game.Active) {
+            result.checksOut = false;
+            result.response =
+            "That quest happend long ago.\nI think they died in that one.";
+            return result;
+        }
+    }
+
+    //check if a player has already signed to a game
+    if (checksNeeded.playerIsAlreadySignedUpCheck) {
+        if (gamesDAO.playerHasSignedUp(playerID, gameID)) {
+            result.checksOut = false;
+            result.response = "You have already enlisted to this quest!";
+            return result;
+        }
+    }
+
+    //check if a game is fully booked
+    if (checksNeeded.gameIsFullyBookedCheck) {
+        if (gamesDAO.gameIsFullyBooked(gameID)) {
+            result.checksOut = false;
+            result.response =
+            "Ugh! The road is not wide enough for all of you!\nYou'll have to sit this one out im afraid...\nGame is fully booked";
+            return result;
+        }
+    }
+
+    result.game = game;
+    return result;
+};
+
+const setGameDate = function (playerID, variables) {
+    const gameID = variables.split(" ")[0];
+    const date = variables.split(" ").slice(1).join(" ");
+    const checksNeeded = {
+        varsLengthCheck: {
+            needed: true,
+            length: 2,
+        },
+        gameExistsCheck: true,
+        playerIsGameCreatorCheck: true,
+        gameIsActive: true,
+    };
+    const result = gameChecks(checksNeeded, playerID, gameID, variables);
+
+    if (result.checksOut) {
+        result.game.Date = date;
+        gamesDAO.setGame(gameID, result.game);
+        return "We will march forward in " + date + ".\nDate update Successful.";
+    } else {
+        return result.response;
+    }
+};
+
+const setGameDesc = function (playerID, variables) {
+    const gameID = variables.split(" ")[0];
+    const desc = variables.split(" ").slice(1).join(" ");
+    const checksNeeded = {
+        varsLengthCheck: {
+            needed: true,
+            length: 2,
+        },
+        gameExistsCheck: true,
+        playerIsGameCreatorCheck: true,
+        gameIsActive: true,
+    };
+    const result = gameChecks(checksNeeded, playerID, gameID, variables);
+
+    if (result.checksOut) {
+        result.game.Description = desc;
+        gamesDAO.setGame(gameID, result.game);
+        return "Good plan!\nHope you wont burn in lava.\nDescription update Successful.";
+    } else {
+        return result.response;
+    }
+};
+
+const signUp = function (playerUserName, playerID, variables) {
+    const gameID = variables.split(" ")[0];
+    const checksNeeded = {
+        varsLengthCheck: {
+            needed: true,
+            length: 1,
+        },
+        gameExistsCheck: true,
+        gameIsActive: true,
+        playerIsAlreadySignedUpCheck: true,
+        gameIsFullyBookedCheck: true,
+    };
+    const character = charactersDAO.getActiveCharacter(playerID);
+    const result = gameChecks(checksNeeded, playerID, gameID, variables);
+
+    if (result.checksOut) {
+        result.game.Players.push({
+            PlayerUsername: playerUserName,
+            PlayerID: playerID,
+            CharacterID: character.CharacterID,
+            CharacterName: character.CharacterName,
+        });
+        gamesDAO.setGame(gameID, result.game);
+        return "Prepare your weapon and don your armor.\nThis will be a tough one.\nSignup Successful.";
+    } else {
+        return result.response;
+    }
+};
+
+const showActiveGames = function () {
+    let gamesString = "";
+    const activeGames = gamesDAO.getActiveGames();
+    for (let index in activeGames) {
+        gamesString +=
+            "Game Number: " +
+            index +
+            "\nCreator: " +
+            activeGames[index].Creator +
+            "\nDate: " +
+            activeGames[index].Date +
+            "\nDescription: " +
+            activeGames[index].Description;
+        if (activeGames[index].Players.length > 0) {
+            gamesString += "\nPlayers:";
+            activeGames[index].Players.forEach((player) => {
+            gamesString += "\n\t" + player.CharacterName;
+            });
+        }
+        gamesString += "\n\n";
+    }
+    return gamesString;
+};
+
+/**********************************************************************************************/
+//
+//
+//                                  Main Facade Function             
+//
+//
+/**********************************************************************************************/
+
+exports.IncomingMessage = async function (message) {
+    const processedMessage = messageController.ProcessMessage(message);
+    if (processedMessage.workNeeded) {
+      await DoWork(processedMessage);
+    }
+    if (processedMessage.responseNeeded) {
+      let response;
+      if(Array.isArray(processedMessage.response) && processedMessage.editedResponseNeeded) {
+        response = processedMessage.response.slice(1,processedMessage.response.length);
+      } else {
+        response = processedMessage.response;
+      }
+      messageController.SendMessage(
+        processedMessage.channel,
+        response,
+        processedMessage.embed
+      );
+    }
+    if (processedMessage.editedResponseNeeded) {
+      let response;
+      if(Array.isArray(processedMessage.response)) {
+        response = processedMessage.response[0];
+      } else {
+        response = processedMessage.response;
+      }
+      messageController.EditMessage(
+        processedMessage.responseToEdit,
+        response
+      );
+    }
+}
+
+const DoWork = async function (processedMessage) {
+    processedMessage.responseNeeded = true;
+    if (processedMessage.parsedMessage.command === "test") {
+        processedMessage.response = await testFunction1();
+        processedMessage.responseNeeded = false;
+    } else if (processedMessage.parsedMessage.command === "help") {
+        processedMessage.response = help(processedMessage.embed);
+    } else if (processedMessage.parsedMessage.command === "roll") {
+        processedMessage.response = roll(
+            processedMessage.parsedMessage.variables
+        );
+    } else if (processedMessage.parsedMessage.command === "spell") {
+        processedMessage.responseToEdit = await messageController.SendMessage(
+            processedMessage.channel,
+            "Searching the great library...",
+            processedMessage.embed
+        );
+        processedMessage.response = await getSpell(
+            processedMessage.parsedMessage.variables
+        );
+        processedMessage.responseNeeded = false;
+        processedMessage.editedResponseNeeded = true;
+    } else if (processedMessage.parsedMessage.command === "weapons") {
+        processedMessage.responseToEdit = await messageController.SendMessage(
+            processedMessage.channel,
+            "Searching the great library...",
+            processedMessage.embed
+        );
+        processedMessage.response = await getAllRelevantEquipment(
+            processedMessage.parsedMessage.command
+        );
+        processedMessage.responseNeeded = false;
+        processedMessage.editedResponseNeeded = true;
+    } else if (processedMessage.parsedMessage.command === "armors") {
+        processedMessage.responseToEdit = await messageController.SendMessage(
+            processedMessage.channel,
+            "Searching the great library...",
+            processedMessage.embed
+        );
+        processedMessage.response = await getAllRelevantEquipment(
+            processedMessage.parsedMessage.command
+        );
+        processedMessage.responseNeeded = false;
+        processedMessage.editedResponseNeeded = true;
+    } else if (processedMessage.parsedMessage.command === "ag") {
+        processedMessage.responseToEdit = await messageController.SendMessage(
+            processedMessage.channel,
+            "Searching the great library...",
+            processedMessage.embed
+        );
+        processedMessage.response = await getAllRelevantEquipment(
+            processedMessage.parsedMessage.command
+        );
+        processedMessage.responseNeeded = true;
+        processedMessage.editedResponseNeeded = true;
+    } else if (processedMessage.parsedMessage.command === "mi") {
+        processedMessage.responseToEdit = await messageController.SendMessage(
+            processedMessage.channel,
+            "Searching the great library...",
+            processedMessage.embed
+        );
+        processedMessage.response = await getAllRelevantEquipment(
+            processedMessage.parsedMessage.command
+        );
+        processedMessage.responseNeeded = false;
+        processedMessage.editedResponseNeeded = true;
+    } else if (processedMessage.parsedMessage.command === "rc") {
+        processedMessage.response = registerCharacter(
+            processedMessage.player.playerID,
+            processedMessage.player.playerUserName,
+            processedMessage.parsedMessage.variables
+        );
+    } else if (processedMessage.parsedMessage.command === "gs") {
+        processedMessage.response = goldStatus(
+            processedMessage.player.playerID,
+            processedMessage.embed
+        );
+    } else if (processedMessage.parsedMessage.command === "active") {
+        processedMessage.response = setActiveCharacter(
+            processedMessage.player.playerID,
+            processedMessage.parsedMessage.variables
+        );
+    } else if (processedMessage.parsedMessage.command === "gg") {
+        processedMessage.response = giveGold(
+            processedMessage.player.playerID,
+            processedMessage.parsedMessage.variables
+        );
+    } else if (processedMessage.parsedMessage.command === "agg") {
+        processedMessage.response = adminGiveGold(
+            processedMessage.player.playerID,
+            processedMessage.parsedMessage.variables
+        );
+    } else if (processedMessage.parsedMessage.command === "pay") {
+        processedMessage.response = pay(
+            processedMessage.player.playerID,
+            processedMessage.parsedMessage.variables
+        );
+    } else if (processedMessage.parsedMessage.command === "creategame") {
+        processedMessage.response = createANewGame(
+            processedMessage.player.playerUserName,
+            processedMessage.player.playerID
+        );
+    } else if (processedMessage.parsedMessage.command === "setgamedate") {
+        processedMessage.response = setGameDate(
+            processedMessage.player.playerID,
+            processedMessage.parsedMessage.variables
+        );
+    } else if (processedMessage.parsedMessage.command === "setgamedesc") {
+        processedMessage.response = setGameDesc(
+            processedMessage.player.playerID,
+            processedMessage.parsedMessage.variables
+        );
+    } else if (processedMessage.parsedMessage.command === "signup") {
+        processedMessage.response = signUp(
+            processedMessage.player.playerUserName,
+            processedMessage.player.playerID,
+            processedMessage.parsedMessage.variables
+        );
+    } else if (processedMessage.parsedMessage.command === "showgames") {
+        processedMessage.response = showActiveGames();
+    } else {
+        processedMessage.response =
+        "I cant understand what you're saying, please be more precise!\nUnrecognized Command";
+    }
+};

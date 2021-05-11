@@ -6,72 +6,102 @@ const uri = process.env.MONGODB_CONNECTION_STRING;
 const DBName = process.env.DB_NAME;
 
 //get functions
-exports.getPlayerCharacterList = async function (playerID) {
-  return await getPlayerCharacterList(playerID);
-};
-async function getPlayerCharacterList(playerID) {
+async function getPlayerByCharacterID(characterID) {
   const mongoClient = getMongoDBClient();
-  let returnValue;
+  let result;
+    try {
+      await mongoClient.connect();
+      result = await mongoClient
+        .db(DBName)
+        .collection("characters")
+        .findOne({'Characters.CharacterID': Number(characterID)});
+    } catch (e) {
+      console.error(e);
+    } finally {
+      await mongoClient.close();
+      return result;
+    }
+};
+async function getPlayerByPlayerID(playerID) {
+  const mongoClient = getMongoDBClient();
+  let result;
   try {
     await mongoClient.connect();
-    let result = await mongoClient
+    result = await mongoClient
       .db(DBName)
       .collection("characters")
       .findOne({ PlayerID: playerID });
-    returnValue = result.Characters;
   } catch (e) {
     console.error(e);
   } finally {
     await mongoClient.close();
-    if (returnValue == undefined) {
-      return null;
-    }
-    return returnValue;
+    return result;
   }
-}
+};
+async function getCharacter(characterID) {
+  const player = await getPlayerByCharacterID(characterID);
+  if(player){
+    return player.Characters.find((char) => {
+      return char.CharacterID == Number(characterID);
+    });
+  }
+  return null;
+};
 
+exports.characterExist = async function (characterID) {
+  return await getCharacter(characterID);
+};
+exports.getACharacterPlayer = async function (characterID) {
+  const char = await getCharacter(characterID);
+  if(char){
+    return char.PlayerID;
+  }
+  return false;
+};
+exports.getCharacterGold = async function (characterID) {
+  const characters = await (getPlayerByCharacterID(characterID)).Characters;
+  if(characters){
+    const character = characterList.find((char) => {
+      if (char.CharacterID === Number(characterID)) {
+        return char;
+      }
+    });
+    if (character) {
+      return character.Gold;
+    }
+  }
+  return null;
+};
 exports.getActiveCharacter = async function (playerID) {
-  return await getActiveCharacter(playerID);
-};
-async function getActiveCharacter(playerID) {
-  const characterList = await getPlayerCharacterList(playerID);
-  const character = characterList.find((char) => {
-    if (char.ActiveCharacter === true) {
-      return char;
+  const characters = await (getPlayerByPlayerID(playerID)).Characters;
+  if(characters){
+    const character = characters.find((char) => {
+      if (char.ActiveCharacter === true) {
+        return char;
+      }
+    });
+    if (character) {
+      return character;
     }
-  });
-  if (character === undefined) {
-    return null;
   }
-  return character;
-}
-
-exports.getCharacterGold = async function (playerID, characterID) {
-  return await getCharacterGold(playerID, characterID);
+  return null;
 };
-async function getCharacterGold(playerID, characterID) {
-  const characterList = await getPlayerCharacterList(playerID);
-  const character = characterList.find((char) => {
-    if (char.CharacterID === Number(characterID)) {
-      return char;
-    }
-  });
-  if (character === undefined) {
-    return null;
+exports.characterBelongsToPlayer = async function (playerID, characterID) {
+  const player = await getPlayerByCharacterID(characterID);
+  if(player && player.PlayerID == playerID) {
+    return true;
   }
-  return character.Gold;
-}
+  return false;
+};
 
 //update functions
 exports.addGoldToCharacter = async function (playerID, characterID, gold) {
   const mongoClient = getMongoDBClient();
   try {
-    const newGold =
-      (await getCharacterGold(playerID, characterID)) + Number(gold);
-
+    const newGold = (await getCharacterGold(playerID, characterID)) + Number(gold);
     characterID = Number(characterID);
     await mongoClient.connect();
-    const result = await mongoClient
+    await mongoClient
       .db(DBName)
       .collection("characters")
       .updateOne(
@@ -111,14 +141,12 @@ exports.writeNewCharacter = async function (
   const mongoClient = getMongoDBClient();
   try {
     const characterList = await getPlayerCharacterList(playerID);
-    console.log(characterList);
     characterList.push({
       CharacterName: characterName,
       Gold: 0,
       CharacterID: newCharacterID,
       ActiveCharacter: isActiveCharacter,
     });
-    console.log(characterList);
     newCharacterID = Number(newCharacterID);
     await mongoClient.connect();
     const result = await mongoClient
@@ -144,7 +172,7 @@ exports.changeActiveCharacter = async function (
     const characterList = await getPlayerCharacterList(playerID);
     characterList.forEach((char) => {
       if (
-        char.CharacterID === oldActiveCharacter ||
+        char.CharacterID === Number(oldActiveCharacter) ||
         char.CharacterID === Number(newActiveCharacter)
       ) {
         char.ActiveCharacter = !char.ActiveCharacter;

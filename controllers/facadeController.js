@@ -1,4 +1,3 @@
-
 const { XMLHttpRequest } = require("xmlhttprequest");
 
 const messageController = require("./messageController.js");
@@ -11,7 +10,8 @@ const DBPaths = {
     characterByIDTablePath: "databases/characterByID.json",
     transactionsTablePath: "databases/transactions.json",
     permissionsTablePath: "databases/permissions.json",
-  };
+};
+
 const JsonTable = require("../jsonTable");
 const gamesDAO = (function () {
     const gamesTable = new JsonTable(DBPaths.gamesTablePath);
@@ -66,10 +66,13 @@ const gamesDAO = (function () {
     };
   })();
 const countersDAO = require("../json_daos/countersDAO.js");
-const charactersDAO = require("../json_daos/charactersDAO.js");
+const charactersDAO = require("../mongodb_daos/charactersDAO.js");
 const characterByIDDAO = require("../json_daos/characterByIDDAO.js");
 const transactionsDAO = require("../json_daos/transactionDAO");
 const permissionsDAO = require("../json_daos/permissionsDAO.js");
+
+let prefix = process.env.PREFIX;
+
 
 //Help
 const help = function (embed) {
@@ -81,26 +84,26 @@ const help = function (embed) {
     "I usually dont take commands from the likes of you but for now ill make an exception.\n" +
     "The commands are:\n\n" +
     "Dice:\n" +
-    "Dice Rolls - /roll [Number]d[Number]+[Number]\n" +
+    "Dice Rolls - "+prefix+"roll [Number]d[Number]+[Number]\n" +
     "\n" +
     "Game Material:\n" +
-    "Searching for a spell (Only SRD) - /spell [Name]\n" +
+    "Searching for a spell (Only SRD) - "+prefix+"spell [Name]\n" +
     "\n" +
     "Game Managing:\n" +
-    "Create a new game - /creategame\n" +
-    "Set a game date - /setgamedate [GameNumber] [Date]\n" +
-    "Set a game description - /setgamedesc [GameNumber] [Description]\n" +
-    "Show active games - /showgames\n" +
-    "Show game - /showgame [GameNumber]\n" +
-    "Sign up to a game (A) - /signup [GameNumber]\n" +
-    "Close game - /closegame [GameNumber]\n" +
+    "Create a new game - "+prefix+"creategame\n" +
+    "Set a game date - "+prefix+"setgamedate [GameNumber] [Date]\n" +
+    "Set a game description - "+prefix+"setgamedesc [GameNumber] [Description]\n" +
+    "Show active games - "+prefix+"showgames\n" +
+    "Show game - "+prefix+"showgame [GameNumber]\n" +
+    "Sign up to a game (A) - "+prefix+"signup [GameNumber]\n" +
+    "Close game - "+prefix+"closegame [GameNumber]\n" +
     "\n" +
     "Gold Trade:\n" +
-    "Register a character - /rc [CharacterName]\n" +
-    "View your characters gold status - /gs\n" +
-    "Change active character - /active [CharacterID]\n" +
-    "Make a payment (A) - /pay [Amount]\n" +
-    "Transfer gold to another character (A) - /gg [ReceivingCharacterID] [Amount]\n" +
+    "Register a character - "+prefix+"rc [CharacterName]\n" +
+    "View your characters gold status - "+prefix+"gs\n" +
+    "Change active character - "+prefix+"active [CharacterID]\n" +
+    "Make a payment (A) - "+prefix+"pay [Amount]\n" +
+    "Transfer gold to another character (A) - "+prefix+"gg [ReceivingCharacterID] [Amount]\n" +
     "\n" +
     "Commands marked with (A) uses your current active character."
     );
@@ -365,14 +368,12 @@ const registerCharacter = function (playerID, playerUserName, variables) {
 };
 
 //Active Character
-const setActiveCharacter = function (playerID, variables) {
+const setActiveCharacter = async function (playerID, variables) {
     const newCharacterID = variables.split(" ")[0];
     if (
-        characterByIDDAO.characterExists(newCharacterID) &&
-        characterByIDDAO.characterBelongsToPlayer(playerID, newCharacterID)
+        await charactersDAO.characterBelongsToPlayer(playerID, newCharacterID)
     ) {
-        const activeCharacterID = charactersDAO.getActiveCharacter(playerID)
-            .CharacterID;
+        const activeCharacterID = (await charactersDAO.getActiveCharacter(playerID)).CharacterID;
         if (activeCharacterID === Number(newCharacterID)) {
             return "This character is already your active character.";
         } else {
@@ -396,9 +397,9 @@ const setActiveCharacter = function (playerID, variables) {
 /**********************************************************************************************/
 
 //Gold Status
-const getGoldStatusStringBuilder = function (playerID) {
+const getGoldStatusStringBuilder = async function (playerID) {
     let status = "";
-    const playerCharacters = charactersDAO.getPlayerCharacterList(playerID);
+    const playerCharacters = await charactersDAO.getPlayerCharacterList(playerID);
     playerCharacters.forEach((character) => {
         status += `${character.CharacterName} (`;
         if (character.ActiveCharacter === true) {
@@ -409,8 +410,8 @@ const getGoldStatusStringBuilder = function (playerID) {
     return status;
 };
 
-const goldStatus = function (playerID, embed) {
-    const goldStatus = getGoldStatusStringBuilder(playerID);
+const goldStatus = async function (playerID, embed) {
+    const goldStatus = await getGoldStatusStringBuilder(playerID);
     if (goldStatus === "") {
         embed["embedNeeded"] = false;
         return "It seems that you dont have any characters.\nA shame really, guess ill have to find treasure elsewhere.\n* Flies away *\nNo characters associated to this user.";
@@ -424,7 +425,7 @@ const goldStatus = function (playerID, embed) {
 };
 
 //Give Gold Functions
-const goldTransaction = function (
+const goldTransaction = async function (
     playerGiverID,
     characterGiverID,
     playerReceiverID,
@@ -432,14 +433,10 @@ const goldTransaction = function (
     gold
 ) {
     //reduce from giver
-    charactersDAO.addGoldToCharacter(playerGiverID, characterGiverID, -gold);
+    await charactersDAO.addGoldToCharacter(playerGiverID, characterGiverID, -gold);
 
     //increase receiver
-    charactersDAO.addGoldToCharacter(
-        playerReceiverID,
-        characterReceiverID,
-        gold
-    );
+    await charactersDAO.addGoldToCharacter(playerReceiverID, characterReceiverID, gold);
 
     //record the transaction in the transactions json
     transactionsDAO.recordTransactionDetails(
@@ -452,117 +449,187 @@ const goldTransaction = function (
     countersDAO.increaseCounter("transactions");
 };
 
-const giveGold = function (playerGiverID, variables) {
-    //get information
-    if (variables.split(" ").length < 2) {
-        return "Invalid input";
+const goldChecks = async function (checksNeeded, playerGiverID, variables) {
+
+    const result = {
+        checksOut: true,
+        response: null
+    };
+
+    let characterGiverID;
+    let characterReceiverID;
+    let gold;
+
+    //check for valid input string
+    if (checksNeeded.varsLengthCheck) {
+        const x = variables.split(" ");
+        const y = variables.split(" ").length;
+        if (variables.split(" ").length < checksNeeded.varsLengthCheck) {
+            result.checksOut = false;
+            result.response =
+            "Stop with this Jibber Jabber!\nYou dont make sense!\nBad Command";
+            return result;
+        } else if(checksNeeded.varsLengthCheck == 2){
+            characterReceiverID = variables.split(" ")[0];
+        } 
+        gold = variables.split(" ")[checksNeeded.varsLengthCheck - 1];
     }
 
-    const characterGiverID = charactersDAO.getActiveCharacter(playerGiverID).CharacterID;
-    const characterReceiverID = variables.split(" ")[0];
-    const playerReceiverID = characterByIDDAO.getACharacterPlayer(characterReceiverID);
-    const gold = variables.split(" ")[1];
+    //check admin priviliges
+    if (checksNeeded.hasAdminPriviliges) {
+        if (!(await permissionsDAO.userHasAdminRights(playerGiverID))) {
+            result.checksOut = false;
+            result.response = "You are not powerful enough to use this command!\n";
+            return result;
+        }
+    }
 
     //player doesn't have any characters
-    if (characterGiverID === undefined) {
-        return "You don't seem to represent any known individual!\nNo active character found";
+    if (checksNeeded.playerHasCharacters) {
+        //get a player active character
+        characterGiverID = (await charactersDAO.getActiveCharacter(playerGiverID)).CharacterID;
+        
+        if (characterGiverID === undefined) {
+            result.checksOut = false;
+            result.response = "You don't seem to represent any known individual!\nNo active character found";
+            return result
+        }
     }
+
     //giving gold to yourself
-    if (characterGiverID == characterReceiverID) {
-        return "Giving gold to yourself even though its possible is just stupid.\nTransaction Successful?";
+    if (checksNeeded.selfGiver) {
+        if (characterGiverID == characterReceiverID) {
+            result.checksOut = false;
+            result.response = "Giving gold to yourself even though its possible is just stupid.\nTransaction Successful?";
+            return result;
+        }
     }
 
     //giving negative gold
-    if (Number(gold) < 0) {
-        return "You think you can outwit me fool?\nNice try...";
+    if (checksNeeded.negativeGold) {
+        if (Number(gold) < 0) {
+            result.checksOut = false;
+            result.response = "You think you can outwit me fool?\nNice try...";
+            return result;
+        }
     }
 
     //check if character exists
-    if (characterByIDDAO.characterExists(characterReceiverID)) {
-        //Enough gold to give
-        if (
-            charactersDAO.getCharacterGold(playerGiverID, characterGiverID) >= gold
-        ) {
-            //perform the transaction
-            goldTransaction(
+    if (checksNeeded.characterReceiverExists) {
+        if (!(await charactersDAO.characterExist(characterReceiverID))) {
+            result.checksOut = false;
+            result.response =
+            "I was'nt able to find that PersonBeastOoze entity!\nCharacter not found";
+            return result;
+        }
+    }
+
+    //the Giver character does not have enough gold
+    if (checksNeeded.enoughGold) {
+        if (!(charactersDAO.getCharacterGold(characterGiverID) >= gold)) {
+            result.checksOut = false;
+            result.response = "Your coffers are not able at the current moment to afford that transaction!\nTransaction failed\n";
+            return result;
+        }
+    }
+
+    if(checksNeeded.playerHasCharacters){
+        result.characterGiverID = characterGiverID;
+    }
+    if (checksNeeded.varsLengthCheck){
+        result.characterReceiverID = characterReceiverID
+        result.gold = gold;
+    }
+
+    
+    return result;
+};
+
+const giveGold = async function (playerGiverID, variables) {
+
+    const checksNeeded = {
+        varsLengthCheck: 2,
+        playerHasCharacters: true,
+        selfGiver: true,
+        negativeGold: true,
+        characterReceiverExists: true,
+        enoughGold: true
+    };
+    const result = await goldChecks(checksNeeded, playerGiverID, variables);
+
+    if (result.checksOut) {
+        
+        const playerReceiverID = await charactersDAO.getACharacterPlayer(result.characterReceiverID);
+
+        goldTransaction(
             playerGiverID,
-            characterGiverID,
+            result.characterGiverID,
             playerReceiverID,
-            characterReceiverID,
-            gold
-            );
+            result.characterReceiverID,
+            Number(result.gold)
+        );
 
-            return "Transaction Successful!";
-        }
-
-        //the Giver character is not viable for the transaction
-        return "Your coffers are not able at the current moment to afford that transaction!\nTransaction failed\n";
-    } else {
-        return "I was'nt able to find that PersonBeastOoze entity!\nCharacter not found";
+        result.response = "Transaction Successful!";
     }
+
+    return result.response;
 };
 
-const adminGiveGold = function (playerGiverID, variables) {
-    //get information
-    const characterID = variables.split(" ")[0];
-    const gold = variables.split(" ")[1];
+const adminGiveGold = async function (playerGiverID, variables) {
+    
+    const checksNeeded = {
+        varsLengthCheck: 2,
+        hasAdminPriviliges: true,
+        playerHasCharacters: true,
+        characterReceiverExists: true
+    };
+    const result = await goldChecks(checksNeeded, playerGiverID, variables);
 
-    //check for admin permissions
-    if (permissionsDAO.userHasAdminRights(playerGiverID)) {
-        //check if the receiver character exists
-        if (characterByIDDAO.characterExists(characterID)) {
-            //transfer the gold
-            charactersDAO.addGoldToCharacter(
-                characterByIDDAO.getACharacterPlayer(characterID),
-                characterID,
-                gold
-            );
+    if(result.checksOut){
 
-            //record the transfer
-            transactionsDAO.recordTransactionDetails(
-                "Admin",
-                characterID,
-                gold,
-                countersDAO.getCounter("transactions")
-            );
+        const playerReceiverID = await charactersDAO.getACharacterPlayer(result.characterReceiverID);
+        
+        await charactersDAO.addGoldToCharacter(
+            playerReceiverID,
+            result.characterReceiverID,
+            Number(result.gold)
+        );
 
-            //update transaction counter in the counters json
-            countersDAO.increaseCounter("transactions");
+        await transactionsDAO.recordTransactionDetails(
+            "Admin",
+            result.characterReceiverID,
+            Number(result.gold),
+            countersDAO.getCounter("transactions")
+        );
 
-            return "The gold was delievered to the character!\n";
-        } else {
-            return "I am sorry my lord, i could'nt find the creature.\nTransfer failed.";
-        }
-    } else {
-        return "You are not powerful enough to use this command!\n";
+        await countersDAO.increaseCounter("transactions");
+
+        result.response = "The gold was delievered to the character!\n";
     }
+    
+    return result.response;
 };
 
-const pay = function (playerID, variables) {
-    //get information
-    const gold = variables.split(" ")[0];
-    const characterPayerID = charactersDAO.getActiveCharacter(playerID).CharacterID;
+const pay = async function (playerGiverID, variables) {
 
-    //player doesn't have any characters
-    if (characterPayerID === undefined) {
-        return "You don't seem to represent any known individual!\nNo active character found";
+    const checksNeeded = {
+        varsLengthCheck: 1,
+        playerHasCharacters: true,
+        negativeGold: true,
+        enoughGold: true
+    };
+
+    const result = await goldChecks(checksNeeded, playerGiverID, variables);
+
+    if (result.checksOut) {
+
+        await charactersDAO.addGoldToCharacter(playerGiverID, result.characterGiverID, -Number(result.gold));
+
+        result.response = "Transaction Successful!";
     }
 
-    //paying negative gold
-    if (gold < 0) {
-        return "Not gonna work...";
-    }
+    return result.response;
 
-    //Enough gold to make payment
-    if (charactersDAO.getCharacterGold(playerID, characterPayerID) >= gold) {
-        //perform the transaction
-        charactersDAO.addGoldToCharacter(playerID, characterPayerID, -gold);
-
-        return "Transaction Successful!";
-    }
-
-    //the Giver character is not viable for the transaction
-    return "Your coffers are not able at the current moment to afford that transaction!\nTransaction failed\n";
 };
 
 /**********************************************************************************************/
@@ -573,14 +640,14 @@ const pay = function (playerID, variables) {
 //
 /**********************************************************************************************/
 
-const createANewGame = function (playerUserName, playerID) {
+const createANewGame = async function (playerUserName, playerID) {
     const newGameID = countersDAO.getCounter("gameCounter");
     gamesDAO.createAGame(newGameID, playerUserName, playerID);
     countersDAO.increaseCounter("gameCounter");
     return `The quest has been declared!\nNow gather worthy adventurers to aid you.\nGame number is: ${newGameID}`;
 };
 
-const gameChecks = function (checksNeeded, playerID, gameID, variables) {
+const gameChecks = async function (checksNeeded, playerID, gameID, variables) {
     const result = {
         checksOut: true,
         response: null,
@@ -653,7 +720,7 @@ const gameChecks = function (checksNeeded, playerID, gameID, variables) {
     return result;
 };
 
-const setGameDate = function (playerID, variables) {
+const setGameDate = async function (playerID, variables) {
     const gameID = variables.split(" ")[0];
     const date = variables.split(" ").slice(1).join(" ");
     const checksNeeded = {
@@ -676,7 +743,7 @@ const setGameDate = function (playerID, variables) {
     }
 };
 
-const setGameDesc = function (playerID, variables) {
+const setGameDesc = async function (playerID, variables) {
     const gameID = variables.split(" ")[0];
     const desc = variables.split(" ").slice(1).join(" ");
     const checksNeeded = {
@@ -699,7 +766,7 @@ const setGameDesc = function (playerID, variables) {
     }
 };
 
-const signUp = function (playerUserName, playerID, variables) {
+const signUp = async function (playerUserName, playerID, variables) {
     const gameID = variables.split(" ")[0];
     const checksNeeded = {
         varsLengthCheck: {
@@ -728,7 +795,7 @@ const signUp = function (playerUserName, playerID, variables) {
     }
 };
 
-const showActiveGames = function () {
+const showActiveGames = async function () {
     let gamesString = "";
     const activeGames = gamesDAO.getActiveGames();
     for (let index in activeGames) {
@@ -760,6 +827,9 @@ const showActiveGames = function () {
 //
 /**********************************************************************************************/
 
+const testFunction1 = async function(){
+    await charactersDAO.characterExist(11);
+};
 exports.IncomingMessage = async function (message) {
     const processedMessage = messageController.ProcessMessage(message);
     if (processedMessage.workNeeded) {
@@ -859,59 +929,59 @@ const DoWork = async function (processedMessage) {
         processedMessage.responseNeeded = true;
         processedMessage.editedResponseNeeded = true;
     } else if (processedMessage.parsedMessage.command === "rc") {
-        processedMessage.response = registerCharacter(
+        processedMessage.response = await registerCharacter(
             processedMessage.player.playerID,
             processedMessage.player.playerUserName,
             processedMessage.parsedMessage.variables
         );
     } else if (processedMessage.parsedMessage.command === "gs") {
-        processedMessage.response = goldStatus(
+        processedMessage.response = await goldStatus(
             processedMessage.player.playerID,
             processedMessage.embed
         );
     } else if (processedMessage.parsedMessage.command === "active") {
-        processedMessage.response = setActiveCharacter(
+        processedMessage.response = await setActiveCharacter(
             processedMessage.player.playerID,
             processedMessage.parsedMessage.variables
         );
     } else if (processedMessage.parsedMessage.command === "gg") {
-        processedMessage.response = giveGold(
+        processedMessage.response = await giveGold(
             processedMessage.player.playerID,
             processedMessage.parsedMessage.variables
         );
     } else if (processedMessage.parsedMessage.command === "agg") {
-        processedMessage.response = adminGiveGold(
+        processedMessage.response = await adminGiveGold(
             processedMessage.player.playerID,
             processedMessage.parsedMessage.variables
         );
     } else if (processedMessage.parsedMessage.command === "pay") {
-        processedMessage.response = pay(
+        processedMessage.response = await pay(
             processedMessage.player.playerID,
             processedMessage.parsedMessage.variables
         );
     } else if (processedMessage.parsedMessage.command === "creategame") {
-        processedMessage.response = createANewGame(
+        processedMessage.response = await createANewGame(
             processedMessage.player.playerUserName,
             processedMessage.player.playerID
         );
     } else if (processedMessage.parsedMessage.command === "setgamedate") {
-        processedMessage.response = setGameDate(
+        processedMessage.response = await setGameDate(
             processedMessage.player.playerID,
             processedMessage.parsedMessage.variables
         );
     } else if (processedMessage.parsedMessage.command === "setgamedesc") {
-        processedMessage.response = setGameDesc(
+        processedMessage.response = await setGameDesc(
             processedMessage.player.playerID,
             processedMessage.parsedMessage.variables
         );
     } else if (processedMessage.parsedMessage.command === "signup") {
-        processedMessage.response = signUp(
+        processedMessage.response = await signUp(
             processedMessage.player.playerUserName,
             processedMessage.player.playerID,
             processedMessage.parsedMessage.variables
         );
     } else if (processedMessage.parsedMessage.command === "showgames") {
-        processedMessage.response = showActiveGames();
+        processedMessage.response = await showActiveGames();
     } else {
         processedMessage.response =
         "I cant understand what you're saying, please be more precise!\nUnrecognized Command";

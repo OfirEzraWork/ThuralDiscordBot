@@ -17,3 +17,29 @@ const DBPaths = {
   transactionsTablePath: "databases/transactions.json",
   permissionsTablePath: "databases/permissions.json",
 };
+
+async function characterBelongsToPlayer(playerID, characterID) {
+  const mongoClient = getMongoDBClient();
+  let returnValue;
+    try {
+      await mongoClient.connect();
+      let result = await mongoClient
+        .db(DBName)
+        .collection("characters")
+        .findOne({ PlayerID: playerID , 'Characters.CharacterID': Number(characterID)});
+      if(!result) {
+        returnValue = null;
+      } else {
+        returnValue = result.Characters;
+      }
+      
+    } catch (e) {
+      console.error(e);
+    } finally {
+      await mongoClient.close();
+      if (returnValue == undefined) {
+        return null;
+      }
+      return returnValue;
+    }
+  }

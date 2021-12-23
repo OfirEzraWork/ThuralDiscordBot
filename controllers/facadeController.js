@@ -72,11 +72,11 @@ const gamesDAO = (function () {
 })();
 const countersDAO = require("../json_daos/countersDAO.js");
 const characterByIDDAO = require("../json_daos/characterByIDDAO.js");
-const transactionsDAO = require("../json_daos/transactionDAO");
 const permissionsDAO = require("../json_daos/permissionsDAO.js");
 
 //New and good
 const charactersDAO = require("../mongodb_daos/charactersDAO.js");
+const transactionsDAO = require("../mongodb_daos/transactionsDAO");
 const goldFunctions = require("./functions/goldFunctions.js");
 
 let prefix = process.env.PREFIX;
@@ -659,7 +659,8 @@ const showActiveGames = async function () {
 /**********************************************************************************************/
 
 const testFunction1 = async function () {
-  await charactersDAO.characterExist(11);
+  // const result = await transactionsDAO.getAllTransactionForID("Admin");
+  // result.forEach((doc) => console.log(doc));
 };
 exports.IncomingMessage = async function (message) {
   const processedMessage = messageController.ProcessMessage(message);

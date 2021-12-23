@@ -1,5 +1,5 @@
 const charactersDAO = require("../../mongodb_daos/charactersDAO.js");
-const transactionsDAO = require("../../json_daos/transactionDAO");
+const transactionsDAO = require("../../mongodb_daos/transactionsDAO");
 const countersDAO = require("../../json_daos/countersDAO.js");
 const permissionsDAO = require("../../json_daos/permissionsDAO.js");
 
@@ -40,12 +40,7 @@ const goldTransaction = async function (
   );
 
   //record the transaction in the transactions json
-  transactionsDAO.recordTransactionDetails(
-    characterGiverID,
-    characterReceiverID,
-    gold,
-    countersDAO.getCounter("transactions")
-  );
+  transactionsDAO.writeTransaction(characterGiverID, characterReceiverID, gold);
 
   countersDAO.increaseCounter("transactions");
 };
@@ -210,11 +205,10 @@ exports.adminGiveGold = async function (playerGiverID, variables) {
       Number(result.gold)
     );
 
-    await transactionsDAO.recordTransactionDetails(
+    await transactionsDAO.writeTransaction(
       "Admin",
       result.characterReceiverID,
-      Number(result.gold),
-      countersDAO.getCounter("transactions")
+      Number(result.gold)
     );
 
     await countersDAO.increaseCounter("transactions");

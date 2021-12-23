@@ -9,19 +9,19 @@ const DBName = process.env.DB_NAME;
 async function getPlayerByCharacterID(characterID) {
   const mongoClient = getMongoDBClient();
   let result;
-    try {
-      await mongoClient.connect();
-      result = await mongoClient
-        .db(DBName)
-        .collection("characters")
-        .findOne({'Characters.CharacterID': Number(characterID)});
-    } catch (e) {
-      console.error(e);
-    } finally {
-      await mongoClient.close();
-      return result;
-    }
-};
+  try {
+    await mongoClient.connect();
+    result = await mongoClient
+      .db(DBName)
+      .collection("characters")
+      .findOne({ "Characters.CharacterID": Number(characterID) });
+  } catch (e) {
+    console.error(e);
+  } finally {
+    await mongoClient.close();
+    return result;
+  }
+}
 async function getPlayerByPlayerID(playerID) {
   const mongoClient = getMongoDBClient();
   let result;
@@ -37,26 +37,29 @@ async function getPlayerByPlayerID(playerID) {
     await mongoClient.close();
     return result;
   }
-};
+}
 async function getCharacter(characterID) {
   const player = await getPlayerByCharacterID(characterID);
-  if(player){
+  if (player) {
     return player.Characters.find((char) => {
       return char.CharacterID == Number(characterID);
     });
   }
   return null;
-};
-async function getPlayerCharacterList(playerID){
+}
+async function getPlayerCharacterList(playerID) {
   return (await getPlayerByPlayerID(playerID)).Characters;
-};
+}
 
 exports.characterExist = async function (characterID) {
   return await getCharacter(characterID);
 };
+exports.getPlayer = async function (playerID) {
+  return await getPlayerByPlayerID(playerID);
+};
 exports.getACharacterPlayer = async function (characterID) {
   const char = await getPlayerByCharacterID(characterID);
-  if(char){
+  if (char) {
     return char.PlayerID;
   }
   return false;
@@ -70,7 +73,7 @@ exports.getCharacterGold = async function (characterID) {
 };
 exports.getActiveCharacter = async function (playerID) {
   const characters = await getPlayerCharacterList(playerID);
-  if(characters){
+  if (characters) {
     const character = characters.find((char) => {
       if (char.ActiveCharacter === true) {
         return char;
@@ -87,7 +90,7 @@ exports.getPlayerCharacterList = async function (playerID) {
 };
 exports.characterBelongsToPlayer = async function (playerID, characterID) {
   const player = await getPlayerByCharacterID(characterID);
-  if(player && player.PlayerID == playerID) {
+  if (player && player.PlayerID == playerID) {
     return true;
   }
   return false;

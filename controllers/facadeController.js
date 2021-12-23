@@ -2,6 +2,8 @@ const { XMLHttpRequest } = require("xmlhttprequest");
 
 const messageController = require("./messageController.js");
 
+const JsonReader = require("../server/jsonReader.js");
+
 //JsonTable and DBPaths are required for the gamesDAO. Remove when moving gamesDAO to a different file.
 const DBPaths = {
   gamesTablePath: "databases/games.json",
@@ -12,6 +14,9 @@ const DBPaths = {
   permissionsTablePath: "databases/permissions.json",
 };
 
+const WMSTable = new JsonReader("lists/wild-magic-surge-table.json");
+
+//Old and bad
 const JsonTable = require("../jsonTable");
 const gamesDAO = (function () {
   const gamesTable = new JsonTable(DBPaths.gamesTablePath);
@@ -66,10 +71,13 @@ const gamesDAO = (function () {
   };
 })();
 const countersDAO = require("../json_daos/countersDAO.js");
-const charactersDAO = require("../mongodb_daos/charactersDAO.js");
 const characterByIDDAO = require("../json_daos/characterByIDDAO.js");
 const transactionsDAO = require("../json_daos/transactionDAO");
 const permissionsDAO = require("../json_daos/permissionsDAO.js");
+
+//New and good
+const charactersDAO = require("../mongodb_daos/charactersDAO.js");
+const goldFunctions = require("./functions/goldFunctions.js");
 
 let prefix = process.env.PREFIX;
 
@@ -137,6 +145,27 @@ const help = function (embed) {
 };
 
 //Rolls
+function rollTheDice(rollAmount, rollDie, modifiers) {
+  console.log(`${rollAmount} ${rollDie} ${modifiers}`);
+  const values = {
+    rolls: [],
+    modifiers: 0,
+    sum: 0,
+  };
+  for (let i = 0; i < parseInt(rollAmount); i++) {
+    let roll = Math.floor(Math.random() * parseInt(rollDie)) + 1;
+    values.sum = values.sum + roll;
+    values.rolls.push(roll);
+  }
+  if (modifiers) {
+    modifiers.forEach((element) => {
+      values.modifiers = values.modifiers + parseInt(element);
+      values.sum = values.sum + parseInt(element);
+    });
+  }
+  return values;
+}
+
 const commandRoll = function (str) {
   let messageRegex = new RegExp("([0-9]+)d([0-9]+)(\\+([0-9]+))*", "g");
   let messageRegexResult = str.toLowerCase().match(messageRegex);
@@ -144,27 +173,17 @@ const commandRoll = function (str) {
     messageRegexResult != null &&
     messageRegexResult[0] === str.toLowerCase()
   ) {
-    const values = {
-      rolls: [],
-      modifiers: 0,
-      sum: 0,
-    };
     let diceRollRegex = new RegExp("([0-9]+)d([0-9]+)");
     let diceRollRegexResult = str.toLowerCase().match(diceRollRegex);
-    for (let i = 0; i < parseInt(diceRollRegexResult[1]); i++) {
-      let roll =
-        Math.floor(Math.random() * parseInt(diceRollRegexResult[2])) + 1;
-      values.sum = values.sum + roll;
-      values.rolls.push(roll);
-    }
     let modifiersRegex = new RegExp("((?<=\\+)[0-9]+)+", "g");
     let modifiersRegexResult = str.toLowerCase().match(modifiersRegex);
-    if (modifiersRegexResult !== null) {
-      modifiersRegexResult.forEach((element) => {
-        values.modifiers = values.modifiers + parseInt(element);
-        values.sum = values.sum + parseInt(element);
-      });
-    }
+
+    const values = rollTheDice(
+      diceRollRegexResult[1],
+      diceRollRegexResult[2],
+      modifiersRegexResult
+    );
+
     return values;
   } else {
     return null;
@@ -173,6 +192,7 @@ const commandRoll = function (str) {
 
 const commandRollStringBuilder = function (result) {
   if (result !== null) {
+    console.log(result);
     let returnMessage = `Total: ${result.sum}\n`;
     result.rolls.forEach((element) => {
       returnMessage = returnMessage + `${element}, `;
@@ -187,6 +207,29 @@ const commandRollStringBuilder = function (result) {
 const roll = function (variables) {
   return commandRollStringBuilder(commandRoll(variables));
 };
+function fetchWildMagicSurgeDescription(number) {}
+function commandWMSStringBuilder(result, description) {
+  console.log(result);
+  let returnMessage = `You Rolled: ${result.sum}\n`;
+  returnMessage = returnMessage + `${description.result}`;
+  return returnMessage;
+}
+
+function wildMagicSurge(variables) {
+  if (!variables) {
+    const result = rollTheDice(1, 100);
+    const description = WMSTable.Read(Math.ceil(result.sum / 2));
+    return commandWMSStringBuilder(result, description);
+  } else if (
+    Number(variables) &&
+    Number(variables) >= 1 &&
+    Number(variables) <= 100
+  ) {
+    return WMSTable.Read(Math.ceil(variables / 2)).result;
+  } else {
+    return "Wild Magic Surge roll wasn't found";
+  }
+}
 
 //Spells
 const getSpellHttpRequest = function (str) {
@@ -377,7 +420,7 @@ const registerCharacter = async function (playerID, playerUserName, variables) {
 
   //build a new player character list
   console.log("im here");
-  if (await !charactersDAO.getPlayerCharacterList(playerID)) {
+  if (!(await charactersDAO.getPlayer(playerID))) {
     console.log("im not here");
     await charactersDAO.createCharacterList(playerID, playerUserName);
     firstCharacter = true;
@@ -409,7 +452,7 @@ const setActiveCharacter = async function (playerID, variables) {
     if (activeCharacterID === Number(newCharacterID)) {
       return "This character is already your active character.";
     } else {
-      awacharactersDAO.changeActiveCharacter(
+      charactersDAO.changeActiveCharacter(
         playerID,
         activeCharacterID,
         newCharacterID
@@ -418,261 +461,6 @@ const setActiveCharacter = async function (playerID, variables) {
     }
   }
   return `Character not found or it doesn't belong to you`;
-};
-
-/**********************************************************************************************/
-//
-//
-//                                     Gold Functions
-//
-//
-/**********************************************************************************************/
-
-//Gold Status
-const getGoldStatusStringBuilder = async function (playerID) {
-  let status = "";
-  const playerCharacters = await charactersDAO.getPlayerCharacterList(playerID);
-  playerCharacters.forEach((character) => {
-    status += `${character.CharacterName} (`;
-    if (character.ActiveCharacter === true) {
-      status += `Active, `;
-    }
-    status += `ID = ${character.CharacterID}): ${character.Gold} gp\n`;
-  });
-  return status;
-};
-
-const goldStatus = async function (playerID, embed) {
-  const goldStatus = await getGoldStatusStringBuilder(playerID);
-  if (goldStatus === "") {
-    embed["embedNeeded"] = false;
-    return "It seems that you dont have any characters.\nA shame really, guess ill have to find treasure elsewhere.\n* Flies away *\nNo characters associated to this user.";
-  }
-  embed["embedNeeded"] = true;
-  embed["color"] = 2123412;
-  embed["title"] = "Gold Status";
-  embed["thumbnail"] = "assets/dm.jpg";
-
-  return goldStatus;
-};
-
-//Give Gold Functions
-const goldTransaction = async function (
-  playerGiverID,
-  characterGiverID,
-  playerReceiverID,
-  characterReceiverID,
-  gold
-) {
-  //reduce from giver
-  await charactersDAO.addGoldToCharacter(
-    playerGiverID,
-    characterGiverID,
-    -gold
-  );
-
-  //increase receiver
-  await charactersDAO.addGoldToCharacter(
-    playerReceiverID,
-    characterReceiverID,
-    gold
-  );
-
-  //record the transaction in the transactions json
-  transactionsDAO.recordTransactionDetails(
-    characterGiverID,
-    characterReceiverID,
-    gold,
-    countersDAO.getCounter("transactions")
-  );
-
-  countersDAO.increaseCounter("transactions");
-};
-
-const goldChecks = async function (checksNeeded, playerGiverID, variables) {
-  const result = {
-    checksOut: true,
-    response: null,
-  };
-
-  let characterGiverID;
-  let characterReceiverID;
-  let gold;
-
-  //check for valid input string
-  if (checksNeeded.varsLengthCheck) {
-    const x = variables.split(" ");
-    const y = variables.split(" ").length;
-    if (variables.split(" ").length < checksNeeded.varsLengthCheck) {
-      result.checksOut = false;
-      result.response =
-        "Stop with this Jibber Jabber!\nYou dont make sense!\nBad Command";
-      return result;
-    } else if (checksNeeded.varsLengthCheck == 2) {
-      characterReceiverID = variables.split(" ")[0];
-    }
-    gold = variables.split(" ")[checksNeeded.varsLengthCheck - 1];
-  }
-
-  //check admin priviliges
-  if (checksNeeded.hasAdminPriviliges) {
-    if (!(await permissionsDAO.userHasAdminRights(playerGiverID))) {
-      result.checksOut = false;
-      result.response = "You are not powerful enough to use this command!\n";
-      return result;
-    }
-  }
-
-  //player doesn't have any characters
-  if (checksNeeded.playerHasCharacters) {
-    //get a player active character
-    characterGiverID = (await charactersDAO.getActiveCharacter(playerGiverID))
-      .CharacterID;
-
-    if (characterGiverID === undefined) {
-      result.checksOut = false;
-      result.response =
-        "You don't seem to represent any known individual!\nNo active character found";
-      return result;
-    }
-  }
-
-  //giving gold to yourself
-  if (checksNeeded.selfGiver) {
-    if (characterGiverID == characterReceiverID) {
-      result.checksOut = false;
-      result.response =
-        "Giving gold to yourself even though its possible is just stupid.\nTransaction Successful?";
-      return result;
-    }
-  }
-
-  //giving negative gold
-  if (checksNeeded.negativeGold) {
-    if (Number(gold) < 0) {
-      result.checksOut = false;
-      result.response = "You think you can outwit me fool?\nNice try...";
-      return result;
-    }
-  }
-
-  //check if character exists
-  if (checksNeeded.characterReceiverExists) {
-    if (!(await charactersDAO.characterExist(characterReceiverID))) {
-      result.checksOut = false;
-      result.response =
-        "I was'nt able to find that PersonBeastOoze entity!\nCharacter not found";
-      return result;
-    }
-  }
-
-  //the Giver character does not have enough gold
-  if (checksNeeded.enoughGold) {
-    if (!(charactersDAO.getCharacterGold(characterGiverID) >= gold)) {
-      result.checksOut = false;
-      result.response =
-        "Your coffers are not able at the current moment to afford that transaction!\nTransaction failed\n";
-      return result;
-    }
-  }
-
-  if (checksNeeded.playerHasCharacters) {
-    result.characterGiverID = characterGiverID;
-  }
-  if (checksNeeded.varsLengthCheck) {
-    result.characterReceiverID = characterReceiverID;
-    result.gold = gold;
-  }
-
-  return result;
-};
-
-const giveGold = async function (playerGiverID, variables) {
-  const checksNeeded = {
-    varsLengthCheck: 2,
-    playerHasCharacters: true,
-    selfGiver: true,
-    negativeGold: true,
-    characterReceiverExists: true,
-    enoughGold: true,
-  };
-  const result = await goldChecks(checksNeeded, playerGiverID, variables);
-
-  if (result.checksOut) {
-    const playerReceiverID = await charactersDAO.getACharacterPlayer(
-      result.characterReceiverID
-    );
-
-    goldTransaction(
-      playerGiverID,
-      result.characterGiverID,
-      playerReceiverID,
-      result.characterReceiverID,
-      Number(result.gold)
-    );
-
-    result.response = "Transaction Successful!";
-  }
-
-  return result.response;
-};
-
-const adminGiveGold = async function (playerGiverID, variables) {
-  const checksNeeded = {
-    varsLengthCheck: 2,
-    hasAdminPriviliges: true,
-    playerHasCharacters: true,
-    characterReceiverExists: true,
-  };
-  const result = await goldChecks(checksNeeded, playerGiverID, variables);
-
-  if (result.checksOut) {
-    const playerReceiverID = await charactersDAO.getACharacterPlayer(
-      result.characterReceiverID
-    );
-
-    await charactersDAO.addGoldToCharacter(
-      playerReceiverID,
-      result.characterReceiverID,
-      Number(result.gold)
-    );
-
-    await transactionsDAO.recordTransactionDetails(
-      "Admin",
-      result.characterReceiverID,
-      Number(result.gold),
-      countersDAO.getCounter("transactions")
-    );
-
-    await countersDAO.increaseCounter("transactions");
-
-    result.response = "The gold was delievered to the character!\n";
-  }
-
-  return result.response;
-};
-
-const pay = async function (playerGiverID, variables) {
-  const checksNeeded = {
-    varsLengthCheck: 1,
-    playerHasCharacters: true,
-    negativeGold: true,
-    enoughGold: true,
-  };
-
-  const result = await goldChecks(checksNeeded, playerGiverID, variables);
-
-  if (result.checksOut) {
-    await charactersDAO.addGoldToCharacter(
-      playerGiverID,
-      result.characterGiverID,
-      -Number(result.gold)
-    );
-
-    result.response = "Transaction Successful!";
-  }
-
-  return result.response;
 };
 
 /**********************************************************************************************/
@@ -910,14 +698,19 @@ exports.IncomingMessage = async function (message) {
 
 const DoWork = async function (processedMessage) {
   processedMessage.responseNeeded = true;
-  if (processedMessage.parsedMessage.command === "test") {
+  const { command: cmd } = processedMessage.parsedMessage;
+  if (cmd === "test") {
     processedMessage.response = await testFunction1();
     processedMessage.responseNeeded = false;
-  } else if (processedMessage.parsedMessage.command === "help") {
+  } else if (cmd === "help") {
     processedMessage.response = help(processedMessage.embed);
-  } else if (processedMessage.parsedMessage.command === "roll") {
+  } else if (cmd === "roll") {
     processedMessage.response = roll(processedMessage.parsedMessage.variables);
-  } else if (processedMessage.parsedMessage.command === "spell") {
+  } else if (cmd === "wms") {
+    processedMessage.response = wildMagicSurge(
+      processedMessage.parsedMessage.variables
+    );
+  } else if (cmd === "spell") {
     processedMessage.responseToEdit = await messageController.SendMessage(
       processedMessage.channel,
       "Searching the great library...",
@@ -928,103 +721,95 @@ const DoWork = async function (processedMessage) {
     );
     processedMessage.responseNeeded = false;
     processedMessage.editedResponseNeeded = true;
-  } else if (processedMessage.parsedMessage.command === "weapons") {
+  } else if (cmd === "weapons") {
     processedMessage.responseToEdit = await messageController.SendMessage(
       processedMessage.channel,
       "Searching the great library...",
       processedMessage.embed
     );
-    processedMessage.response = await getAllRelevantEquipment(
-      processedMessage.parsedMessage.command
-    );
+    processedMessage.response = await getAllRelevantEquipment(cmd);
     processedMessage.responseNeeded = false;
     processedMessage.editedResponseNeeded = true;
-  } else if (processedMessage.parsedMessage.command === "armors") {
+  } else if (cmd === "armors") {
     processedMessage.responseToEdit = await messageController.SendMessage(
       processedMessage.channel,
       "Searching the great library...",
       processedMessage.embed
     );
-    processedMessage.response = await getAllRelevantEquipment(
-      processedMessage.parsedMessage.command
-    );
+    processedMessage.response = await getAllRelevantEquipment(cmd);
     processedMessage.responseNeeded = false;
     processedMessage.editedResponseNeeded = true;
-  } else if (processedMessage.parsedMessage.command === "ag") {
+  } else if (cmd === "ag") {
     processedMessage.responseToEdit = await messageController.SendMessage(
       processedMessage.channel,
       "Searching the great library...",
       processedMessage.embed
     );
-    processedMessage.response = await getAllRelevantEquipment(
-      processedMessage.parsedMessage.command
-    );
+    processedMessage.response = await getAllRelevantEquipment(cmd);
     processedMessage.responseNeeded = true;
     processedMessage.editedResponseNeeded = true;
-  } else if (processedMessage.parsedMessage.command === "mi") {
+  } else if (cmd === "mi") {
     processedMessage.responseToEdit = await messageController.SendMessage(
       processedMessage.channel,
       "Searching the great library...",
       processedMessage.embed
     );
-    processedMessage.response = await getAllRelevantEquipment(
-      processedMessage.parsedMessage.command
-    );
+    processedMessage.response = await getAllRelevantEquipment(cmd);
     processedMessage.responseNeeded = true;
     processedMessage.editedResponseNeeded = true;
-  } else if (processedMessage.parsedMessage.command === "rc") {
+  } else if (cmd === "rc") {
     processedMessage.response = await registerCharacter(
       processedMessage.player.playerID,
       processedMessage.player.playerUserName,
       processedMessage.parsedMessage.variables
     );
-  } else if (processedMessage.parsedMessage.command === "gs") {
-    processedMessage.response = await goldStatus(
+  } else if (cmd === "gs") {
+    processedMessage.response = await goldFunctions.goldStatus(
       processedMessage.player.playerID,
       processedMessage.embed
     );
-  } else if (processedMessage.parsedMessage.command === "active") {
+  } else if (cmd === "active") {
     processedMessage.response = await setActiveCharacter(
       processedMessage.player.playerID,
       processedMessage.parsedMessage.variables
     );
-  } else if (processedMessage.parsedMessage.command === "gg") {
-    processedMessage.response = await giveGold(
+  } else if (cmd === "gg") {
+    processedMessage.response = await goldFunctions.giveGold(
       processedMessage.player.playerID,
       processedMessage.parsedMessage.variables
     );
-  } else if (processedMessage.parsedMessage.command === "agg") {
-    processedMessage.response = await adminGiveGold(
+  } else if (cmd === "agg") {
+    processedMessage.response = await goldFunctions.adminGiveGold(
       processedMessage.player.playerID,
       processedMessage.parsedMessage.variables
     );
-  } else if (processedMessage.parsedMessage.command === "pay") {
-    processedMessage.response = await pay(
+  } else if (cmd === "pay") {
+    processedMessage.response = await goldFunctions.pay(
       processedMessage.player.playerID,
       processedMessage.parsedMessage.variables
     );
-  } else if (processedMessage.parsedMessage.command === "creategame") {
+  } else if (cmd === "creategame") {
     processedMessage.response = await createANewGame(
       processedMessage.player.playerUserName,
       processedMessage.player.playerID
     );
-  } else if (processedMessage.parsedMessage.command === "setgamedate") {
+  } else if (cmd === "setgamedate") {
     processedMessage.response = await setGameDate(
       processedMessage.player.playerID,
       processedMessage.parsedMessage.variables
     );
-  } else if (processedMessage.parsedMessage.command === "setgamedesc") {
+  } else if (cmd === "setgamedesc") {
     processedMessage.response = await setGameDesc(
       processedMessage.player.playerID,
       processedMessage.parsedMessage.variables
     );
-  } else if (processedMessage.parsedMessage.command === "signup") {
+  } else if (cmd === "signup") {
     processedMessage.response = await signUp(
       processedMessage.player.playerUserName,
       processedMessage.player.playerID,
       processedMessage.parsedMessage.variables
     );
-  } else if (processedMessage.parsedMessage.command === "showgames") {
+  } else if (cmd === "showgames") {
     processedMessage.response = await showActiveGames();
   } else {
     processedMessage.response =
